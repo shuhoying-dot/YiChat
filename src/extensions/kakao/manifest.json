@@ -1,0 +1,1 @@
+{"capabilities":["getConversations","getMessages","sendMessage","onMessage"],"description":"KakaoTalk 扩展模块骨架：目标是聚合个人号全部会话（内嵌/扩展路线）。当前为演示数据模式，未连接任何真实账号。","entry":"index.js","id":"kakao","mode":"mock","name":"KakaoTalk","notes":"详见 docs/kakao-接入方案.md：企业官方 API 接入通常需要韩国事业者登录证及授权经销商，资质门槛最高；个人号聚合需走内嵌路线，存在封号与跟版风险。","type":"extension","version":"0.1.0"}

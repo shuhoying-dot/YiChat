@@ -1,0 +1,16 @@
+{
+  "author": "SHU Studio",
+  "dependencies": {
+    "@ant-design/icons": "^6.3.4",
+    "antd": "^6.6.6",
+    "electron-updater": "^6.8.9",
+    "node-machine-id": "^1.1.12",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "description": "多平台消息聚合 SCRM 桌面应用",
+  "license": "MIT",
+  "main": "src/main.js",
+  "name": "open-scrm",
+  "version": "3.5.0"
+}

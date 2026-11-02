@@ -1,0 +1,1 @@
+{"capabilities":["getConversations","getMessages","sendMessage","onMessage"],"description":"LINE 扩展模块骨架：目标是聚合个人号全部会话（内嵌/扩展路线）。当前为演示数据模式，未连接任何真实账号。","entry":"index.js","id":"line","mode":"mock","name":"LINE","notes":"详见 docs/line-接入方案.md：官方 Messaging API 仅支持 Official Account，无法聚合个人号私人会话；个人号聚合需走内嵌官方客户端/扩展路线，存在封号与持续跟版风险。","type":"extension","version":"0.1.0"}
