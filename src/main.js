@@ -756,12 +756,29 @@ if (!gotLock) {
 
 // 创建主窗口
 function createWindow() {
+  // 启动窗口：优先恢复上次关闭时的大小/位置；没有记录时尽量大（上限 1600×1000，不超出屏幕）
+  const __bFile = (() => { try { return path.join(app.getPath('userData'), 'window-bounds.json'); } catch (e) { return ''; } })();
+  let __saved = null;
+  try { if (__bFile) __saved = JSON.parse(require('fs').readFileSync(__bFile, 'utf8')); } catch (e) {}
+  let __useSaved = false;
+  if (__saved && __saved.width >= 960 && __saved.height >= 600 && typeof __saved.x === 'number' && typeof __saved.y === 'number') {
+    try {
+      const __cx = __saved.x + __saved.width / 2, __cy = __saved.y + __saved.height / 2;
+      const __ds = require('electron').screen.getAllDisplays();
+      for (let __i = 0; __i < __ds.length; __i++) { const __a = __ds[__i].workArea; if (__cx >= __a.x && __cx < __a.x + __a.width && __cy >= __a.y && __cy < __a.y + __a.height) { __useSaved = true; break; } }
+    } catch (e) { __useSaved = true; }
+  }
+  let __wa = { width: 1920, height: 1040 };
+  try { __wa = require('electron').screen.getPrimaryDisplay().workAreaSize; } catch (e) {}
+  const __winW = __useSaved ? __saved.width : Math.max(960, Math.min(1600, __wa.width - 32));
+  const __winH = __useSaved ? __saved.height : Math.max(600, Math.min(1000, __wa.height - 32));
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: __winW,
+    height: __winH,
+    ...(__useSaved ? { x: __saved.x, y: __saved.y } : {}),
     minWidth: 960,
     minHeight: 600,
-    title: 'YiChat 译聊 3.5.0',
+    title: 'YiChat 译聊 ' + app.getVersion(),
     webPreferences: {
       // 预加载脚本：通过 contextBridge 安全地暴露 API
       preload: path.join(__dirname, 'preload.js'),
@@ -774,6 +791,19 @@ function createWindow() {
 
   // 渲染层：加载 Vite 构建产物（src/renderer/dist），base './' 保证 file:// 下资源可用
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+
+  if (__useSaved && __saved.maximized) { try { mainWindow.maximize(); } catch (e) {} }
+  // 页面 <title>（index.html 写死 3.5.0）加载后会盖掉窗口标题：拦下页面改名，
+  // 标题只认 BrowserWindow 的 title（已改动态读 app.getVersion()，即 package.json 版本）
+  try { mainWindow.webContents.on('page-title-updated', (e) => { try { e.preventDefault(); } catch (err) {} }); } catch (e) {}
+  // 关闭时记住窗口大小/位置，下次打开恢复
+  mainWindow.on('close', () => {
+    try {
+      if (!__bFile || !mainWindow || mainWindow.isDestroyed()) return;
+      const __nb = mainWindow.getNormalBounds();
+      require('fs').writeFileSync(__bFile, JSON.stringify({ x: __nb.x, y: __nb.y, width: __nb.width, height: __nb.height, maximized: mainWindow.isMaximized() }));
+    } catch (e) {}
+  });
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -983,6 +1013,8 @@ if (autoUpdater) {
 
 // 渲染层"检查更新"按钮调用：返回检查结果摘要
 ipcMain.handle('app:check-update', async () => {
+  // 更新已按用户要求关闭：手动点检查也不再联网，直接回「已是最新」口径，不弹错
+  return { ok: true, available: false, disabled: true, message: '更新已关闭' };
   if (!autoUpdater) return { ok: false, message: '自动更新模块不可用' };
   if (!app.isPackaged) return { ok: false, message: '开发模式下不支持检查更新' };
   try {
@@ -996,6 +1028,7 @@ ipcMain.handle('app:check-update', async () => {
 
 // 用户确认后开始下载更新包
 ipcMain.handle('app:download-update', async () => {
+  return { ok: false, message: '更新已关闭' };
   if (!autoUpdater) return { ok: false };
   await autoUpdater.downloadUpdate();
   return { ok: true };
@@ -1003,6 +1036,7 @@ ipcMain.handle('app:download-update', async () => {
 
 // 下载完成后：安装并重启应用
 ipcMain.handle('app:install-update', async () => {
+  return { ok: false, message: '更新已关闭' };
   if (!autoUpdater) return { ok: false };
   autoUpdater.quitAndInstall(false, true);
   return { ok: true };
@@ -1014,10 +1048,8 @@ app.whenReady().then(() => {
   // 用户明确要求：去掉窗口顶部 File / Edit / View / Window 原生菜单栏
   Menu.setApplicationMenu(null);
   createWindow();
-  // 打包后的应用启动 15 秒后静默检查一次更新（开发模式跳过）
-  if (autoUpdater && app.isPackaged) {
-    setTimeout(() => { autoUpdater.checkForUpdates().catch(() => {}); }, 15000);
-  }
+  // 2026-11-20 用户要求关闭更新：启动不再自动检查更新（原为启动 15 秒后静默检查，
+  // 更新源不可达时会弹错误提示）。版本迭代走手动换 asar，不用应用内更新。
 });
 
 app.on('window-all-closed', () => {

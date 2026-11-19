@@ -24,18 +24,15 @@
         st.id = 'scrm-trans-style';
         (document.head || document.documentElement).appendChild(st);
       }
-      // 2026-11-02 v3 译文卡：无头版式——浅蓝底 + 蓝色左竖线，译文直接跟在原文下（去掉品牌小蓝头）
-      st.textContent = '.scrm-trans-overlay{margin-top:5px!important;background:rgba(47,107,255,.055)!important;border:1px solid rgba(47,107,255,.16)!important;border-left:3px solid #2f6bff!important;border-radius:8px!important;padding:5px 10px 6px!important;position:relative!important;box-shadow:none!important}' +
+      // 2026-11-20 v7 译文格式（用户最终选定 C 分隔线式）：不要卡片不要标签，原文与译文之间一条虚线，译文字号 13、蓝灰色。
+      // 已读勾：2026-10-31 曾按用户要求隐藏，2026-11-20 用户要求恢复——不再藏 .time-sending-status。
+      st.textContent = '.scrm-trans-overlay{margin-top:7px!important;background:transparent!important;border:none!important;border-top:1px dashed rgba(0,0,0,.18)!important;border-radius:0!important;padding:6px 0 2px!important;position:relative!important;box-shadow:none!important}' +
         '.scrm-kw-hit{outline:2px solid #faad14!important;outline-offset:-2px!important}' +
         '.scrm-kw-badge{margin-top:4px!important;font-size:11px!important;color:#ad6800!important;background:#fffbe6!important;border:1px solid #ffe58f!important;border-radius:4px!important;padding:1px 6px!important;display:inline-block!important}' +
-        // 译文正文：正常深灰，和原文清晰区分
-        'div.scrm-trans-overlay div.scrm-trans-text{font-size:12.5px!important;line-height:1.6!important;color:#34405a!important;padding-left:1px!important}' +
-        // 已读勾单独隐藏（用户要求）：有译文的气泡里，time-sending-status 图标去掉
-        '.bubble:has(.scrm-trans-overlay) .time-sending-status,' +
-        'div.message:has(.scrm-trans-overlay) .time-sending-status' +
-        '{display:none!important;visibility:hidden!important}' +
+        // 译文正文：深蓝灰，和原文清晰区分
+        'div.scrm-trans-overlay div.scrm-trans-text{font-size:13px!important;line-height:1.65!important;color:#3d5a80!important;padding-left:1px!important}' +
         // 深色主题（跟随网页/系统）：深色底浅色字
-        '@media (prefers-color-scheme:dark){.scrm-trans-overlay{background:rgba(255,255,255,.06)!important;border-color:rgba(255,255,255,.14)!important;border-left-color:#4096ff!important}' +
+        '@media (prefers-color-scheme:dark){.scrm-trans-overlay{background:transparent!important;border-top-color:rgba(255,255,255,.22)!important}' +
         'div.scrm-trans-overlay div.scrm-trans-text{color:#cdd6e4!important}}';
     } catch (e) {}
   })();
@@ -403,7 +400,7 @@
         // 不剔除会被当成正文送去翻译、原样剩在译文末尾（2026-10-25 用户实测）
         try {
           var c = el.cloneNode(true);
-          var rm = c.querySelectorAll('[data-scrm="trans-overlay"], .time, .message-time, [data-scrm-hidden], .reactions, [class*="reaction"], [class*="Reaction"]');
+          var rm = c.querySelectorAll('[data-scrm="trans-overlay"], .scrm-voice-btn, .scrm-voice-text, .scrm-img-btn, .scrm-img-text, .time, .message-time, [data-scrm-hidden], .reactions, [class*="reaction"], [class*="Reaction"]');
           for (var j = 0; j < rm.length; j++) { try { rm[j].remove(); } catch (e2) {} }
           var t = (c.innerText || '').trim();
           if (t && t.length >= 1 && t.length < 2000) return t;
@@ -415,7 +412,7 @@
       // 兜底：气泡整体文本（同样先克隆剔除译文/时间戳/表情回应区，避免回应头像字母混入）
       try {
         var bc = bubble.cloneNode(true);
-        var brm = bc.querySelectorAll('[data-scrm="trans-overlay"], .time, .message-time, [data-scrm-hidden], .reactions, [class*="reaction"], [class*="Reaction"]');
+        var brm = bc.querySelectorAll('[data-scrm="trans-overlay"], .scrm-voice-btn, .scrm-voice-text, .scrm-img-btn, .scrm-img-text, .time, .message-time, [data-scrm-hidden], .reactions, [class*="reaction"], [class*="Reaction"]');
         for (var bj = 0; bj < brm.length; bj++) { try { brm[bj].remove(); } catch (e3) {} }
         var t3 = (bc.innerText || '').trim();
         if (t3 && t3.length < 2000) return t3;
@@ -642,9 +639,7 @@
             } else {
               tel.appendChild(box);
             }
-            // 小勾隐藏：仅藏已读勾（2026-10-31 用户要求保留发送时间，时间逻辑已全部移除）
-            try { hideIcons(box); } catch (e) {}
-            // （原"隐藏时间戳 + 暴力扫 HH:MM"逻辑已删除：它把整条 span.time 藏了，时间不见了）
+            // 已读勾保留显示（2026-11-20 用户要求恢复；原「小勾隐藏」逻辑已移除）
             return true;
           }
         }
@@ -717,12 +712,13 @@
     if (!card || !card.classList || !card.classList.contains('scrm-trans-overlay')) return;
     var dark = isDarkPage();
     var set = function (k, v) { try { card.style.setProperty(k, v, 'important'); } catch (e) {} };
-    set('margin', '6px 0 2px');
-    set('padding', '6px 10px 7px');
-    set('background', dark ? 'rgba(255,255,255,0.07)' : 'rgba(47,107,255,0.055)');
-    set('border', dark ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(47,107,255,0.16)');
-    set('border-left', dark ? '3px solid #4096ff' : '3px solid #2f6bff');
-    set('border-radius', '8px');
+    set('margin', '7px 0 2px');
+    set('padding', '6px 0 2px');
+    set('background', 'transparent');
+    set('border', 'none');
+    set('border-top', dark ? '1px dashed rgba(255,255,255,0.22)' : '1px dashed rgba(0,0,0,0.18)');
+    set('border-left', 'none');
+    set('border-radius', '0');
     set('box-shadow', 'none');
     set('box-sizing', 'border-box');
     set('display', 'block');
@@ -738,45 +734,10 @@
       trans.style.setProperty('line-height', '1.6', 'important');
       trans.style.setProperty('color', style.color, 'important');
     } else {
-      trans.style.setProperty('font-size', '12.5px', 'important');
-      trans.style.setProperty('line-height', '1.6', 'important');
-      trans.style.setProperty('color', isDarkPage() ? '#cdd6e4' : '#34405a', 'important');
+      trans.style.setProperty('font-size', '13px', 'important');
+      trans.style.setProperty('line-height', '1.65', 'important');
+      trans.style.setProperty('color', isDarkPage() ? '#cdd6e4' : '#3d5a80', 'important');
     }
-  }
-  // 小勾（已读回执）隐藏：从盒子向上逐层找 sending-status 相关元素
-  // 只在 Telegram 启用，其他平台跳过
-  function hideIcons(box) {
-    if (!timeHidingEnabled()) return;
-    try {
-      var p = box.parentElement;
-      var depth = 0;
-      while (p && p !== document.body && p !== document.documentElement && depth < 8) {
-        depth++;
-        var icons = null;
-        try { icons = p.querySelectorAll('[class*="sending-status"]'); } catch (e) {}
-        if (icons && icons.length) {
-          for (var i = 0; i < icons.length; i++) {
-            var ic = icons[i];
-            if (!box.contains(ic)) {
-              ic.style.setProperty('display', 'none', 'important');
-              ic.style.setProperty('visibility', 'hidden', 'important');
-              ic.style.setProperty('width', '0', 'important');
-              ic.style.setProperty('height', '0', 'important');
-            }
-          }
-          break;
-        }
-        p = p.parentElement;
-      }
-    } catch (e) {}
-  }
-  // 时间/勾隐藏只在 Telegram 启用（用户要求）：其他平台跳过，避免干扰通用模板
-  // profilePlatformKey 在 configure() 里从宿主推送的配置中获取
-  function timeHidingEnabled() {
-    try {
-      var k = String(profilePlatformKey || '').toLowerCase();
-      return k.indexOf('telegram') >= 0;
-    } catch (e) { return false; }
   }
 
   function restyle() {
@@ -812,6 +773,7 @@
   setInterval(function () { if (enabled) refresh(); }, 5000);
   // 语音气泡的「转文字」按钮：独立节流，跟翻译开关无关（关掉翻译也可能只是想听写）
   setInterval(function () { ensureVoiceButtons(); }, 4000);
+  setInterval(function () { ensureImgButtons(); }, 4000);
 
 
   // 当前平台标识：宿主经 setTransConfig 下发；没下发时从网址自动识别
@@ -1087,9 +1049,9 @@
     try {
       var css = ''
         + '.scrm-voice-btn{display:inline-flex;align-items:center;gap:3px;margin:6px 0 0;padding:2px 8px;'
-        + 'font-size:11px;line-height:1.6;color:#005dff;background:rgba(0,93,255,.08);'
-        + 'border:1px solid rgba(0,93,255,.25);border-radius:10px;cursor:pointer;font-family:inherit}'
-        + '.scrm-voice-btn:hover{background:rgba(0,93,255,.16)}'
+        + 'font-size:11px;line-height:1.6;color:#3d4451;background:rgba(0,0,0,.05);'
+        + 'border:1px solid rgba(0,0,0,.14);border-radius:10px;cursor:pointer;font-family:inherit}'
+        + '.scrm-voice-btn:hover{background:rgba(0,0,0,.1)}'
         + '.scrm-voice-text{margin-top:4px;padding:4px 8px;font-size:13px;line-height:1.6;color:#262626;'
         + 'background:rgba(0,0,0,.04);border-left:2px solid #005dff;border-radius:4px;white-space:pre-wrap;'
         + 'word-break:break-word}';
@@ -1112,7 +1074,7 @@
         var a = auds[i];
         var src = a.currentSrc || a.getAttribute('src') || a.src || '';
         if (!src) continue;
-        try { if (a.closest('[data-scrm="trans-overlay"]')) continue; } catch (e) {}
+        try { if (a.closest('[data-scrm]')) continue; } catch (e) {}
         var host = null;
         try {
           host = a.closest('.message-in, .message-out, .bubble, [data-testid="msg-container"], [class*="message"], [class*="bubble"]');
@@ -1135,7 +1097,7 @@
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'scrm-voice-btn';
-        btn.setAttribute('data-scrm', 'trans-overlay');
+        btn.setAttribute('data-scrm', 'tool-ui');
         btn.textContent = '转文字';
         (function (h, au, b) {
           b.addEventListener('click', function (ev) {
@@ -1145,21 +1107,112 @@
         })(host, list[i].audio, btn);
         host.appendChild(btn);
       }
+      // Telegram Web K：语音气泡里没有 <audio> 标签（播放器是全局的），
+      // 改按气泡里的播放器结构挂按钮，点击时点它的播放键、从资源记录里抓刚加载的音频。
+      var tg = tgVoiceHosts();
+      for (var j = 0; j < tg.length; j++) {
+        var thost = tg[j].host;
+        if (!thost || !thost.querySelector) continue;
+        if (thost.querySelector('.scrm-voice-btn')) continue;
+        var tbtn = document.createElement('button');
+        tbtn.type = 'button';
+        tbtn.className = 'scrm-voice-btn';
+        tbtn.setAttribute('data-scrm', 'tool-ui');
+        tbtn.textContent = '转文字';
+        (function (h, tgEl, b) {
+          b.addEventListener('click', function (ev) {
+            try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+            askTranscribeTg(h, tgEl, b);
+          });
+        })(thost, tg[j].toggle, tbtn);
+        // Web K 的 .bubble 是整行容器，按钮挂它会飘到行首（气泡外）；挂到 .audio 的父级
+        // （气泡内容盒）里，落在波形下方、气泡内部（2026-11-20 用户截图点名优化）
+        var tbox = thost;
+        try {
+          var au = tg[j].toggle.closest('.audio') || tg[j].toggle;
+          if (au && au.parentElement) tbox = au.parentElement;
+        } catch (e) {}
+        tbox.appendChild(tbtn);
+      }
     } catch (e) {}
+  }
+
+  function tgVoiceHosts() {
+    return safe(function () {
+      var out = [];
+      var bubbles = document.querySelectorAll('.bubble');
+      for (var i = 0; i < bubbles.length; i++) {
+        var b = bubbles[i];
+        try { if (b.closest('[data-scrm="trans-overlay"]')) continue; } catch (e) {}
+        var toggle = b.querySelector('.audio .audio-toggle, .audio-toggle');
+        if (!toggle) continue;
+        // 只要带波形的（语音条/音频文件），排除视频圆圈等其它播放器
+        if (!b.querySelector('.audio-waveform, .audio-waveform-bars, [class*="waveform"]')) continue;
+        out.push({ host: b, toggle: toggle });
+      }
+      return out;
+    }, []);
+  }
+
+  function blobToB64(blob) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () {
+        var s = String(fr.result || '');
+        var i = s.indexOf(',');
+        resolve({ b64: i >= 0 ? s.slice(i + 1) : '', mime: blob.type || 'audio/ogg' });
+      };
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  function encodeWav16(samples, rate) {
+    var n = samples.length;
+    var buffer = new ArrayBuffer(44 + n * 2);
+    var v = new DataView(buffer);
+    function wstr(off, str) { for (var i = 0; i < str.length; i++) v.setUint8(off + i, str.charCodeAt(i)); }
+    wstr(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); wstr(8, 'WAVE');
+    wstr(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    wstr(36, 'data'); v.setUint32(40, n * 2, true);
+    for (var i = 0; i < n; i++) {
+      var x = Math.max(-1, Math.min(1, samples[i]));
+      v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7FFF, true);
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  // 把语音统一转成 16kHz 单声道 WAV：whisper 接口收 wav，小米 MiMo 的对话式识别只收 wav/mp3
+  // （Telegram/WhatsApp 的 ogg-opus 它不收）。解码失败或太长就返回 null，外层原样发送。
+  function blobToWavData(blob) {
+    return blob.arrayBuffer().then(function (buf) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      var ac = new AC();
+      return ac.decodeAudioData(buf).then(function (audio) {
+        try { ac.close(); } catch (e) {}
+        if (!audio || !audio.duration || audio.duration > 300) return null;
+        var rate = 16000;
+        var oc = new OfflineAudioContext(1, Math.max(1, Math.floor(audio.duration * rate)), rate);
+        var node = oc.createBufferSource();
+        node.buffer = audio;
+        node.connect(oc.destination);
+        node.start();
+        return oc.startRendering().then(function (rendered) {
+          var wav = encodeWav16(rendered.getChannelData(0), rate);
+          if (!wav || wav.size > 12 * 1024 * 1024) return null;
+          return blobToB64(wav);
+        });
+      }).catch(function () { try { ac.close(); } catch (e) {} return null; });
+    }).catch(function () { return null; });
   }
 
   function audioToBase64(src) {
     return fetch(src).then(function (r) { return r.blob(); }).then(function (blob) {
-      return new Promise(function (resolve, reject) {
-        var fr = new FileReader();
-        fr.onload = function () {
-          var s = String(fr.result || '');
-          var i = s.indexOf(',');
-          resolve({ b64: i >= 0 ? s.slice(i + 1) : '', mime: blob.type || 'audio/ogg' });
-        };
-        fr.onerror = reject;
-        fr.readAsDataURL(blob);
-      });
+      return blobToWavData(blob).then(function (w) {
+        return w || blobToB64(blob);
+      }).catch(function () { return blobToB64(blob); });
     });
   }
 
@@ -1172,7 +1225,7 @@
     if (!out) {
       out = document.createElement('div');
       out.className = 'scrm-voice-text';
-      out.setAttribute('data-scrm', 'trans-overlay');
+      out.setAttribute('data-scrm', 'tool-ui');
       host.appendChild(out);
     }
     out.textContent = '正在取音频…';
@@ -1195,6 +1248,96 @@
     });
   }
 
+  function askTranscribeTg(host, toggle, btn) {
+    if (btn.getAttribute('data-busy') === '1') return;
+    if (!ipc) return;
+    btn.setAttribute('data-busy', '1');
+    btn.textContent = '识别中…';
+    var out = host.querySelector('.scrm-voice-text');
+    if (!out) {
+      out = document.createElement('div');
+      out.className = 'scrm-voice-text';
+      out.setAttribute('data-scrm', 'tool-ui');
+      (btn.parentElement || host).appendChild(out);
+    }
+    out.textContent = '正在取音频…（会短暂播放一下）';
+    // Telegram Web K 的播放器是全局的：真正的 <audio> 元素挂在页面一个隐藏容器里、
+    // 不在气泡内。点这条的播放键后，去全页面找刚开始播/刚加载的那条 blob 音频。
+    var snapshot = {};
+    try {
+      var a0 = document.querySelectorAll('audio, video');
+      for (var i = 0; i < a0.length; i++) {
+        var s0 = a0[i].currentSrc || a0[i].getAttribute('src') || a0[i].src || '';
+        if (s0) snapshot[s0] = 1;
+      }
+    } catch (e) {}
+    function fail(msg) {
+      try { btn.removeAttribute('data-busy'); btn.textContent = '转文字'; } catch (e) {}
+      out.textContent = msg;
+    }
+    function sendBlob(blob) {
+      var conv = (typeof blobToWavData === 'function') ? blobToWavData(blob) : Promise.resolve(null);
+      conv.then(function (w) { return w || blobToB64(blob); }).catch(function () { return blobToB64(blob); }).then(function (d) {
+        if (!d || !d.b64) { fail('音频取到了但读不出来，再点一次试试'); return; }
+        var id = 'v' + (++voiceReqId);
+        pendingVoice[id] = { btn: btn, out: out };
+        out.textContent = '识别中…（首次可能要几秒）';
+        ipc.sendToHost('yichat:voice-req', { reqId: id, b64: d.b64, mime: d.mime });
+        setTimeout(function () {
+          if (!pendingVoice[id]) return;
+          delete pendingVoice[id];
+          try { btn.removeAttribute('data-busy'); btn.textContent = '转文字'; } catch (e) {}
+          out.textContent = '识别超时了，稍后再点一次';
+        }, 60000);
+      }).catch(function () { fail('音频读不出来，再点一次试试'); });
+    }
+    function grab(media) {
+      var url = '';
+      try { url = media.currentSrc || media.getAttribute('src') || media.src || ''; } catch (e) {}
+      try { media.pause(); } catch (e) {}
+      if (!url) { fail('没抓到这段语音，再点一次试试'); return; }
+      fetch(url).then(function (r) { return r.blob(); }).then(sendBlob).catch(function () {
+        fail('取不到这段语音，再点一次试试');
+      });
+    }
+    function findAudio() {
+      var auds = document.querySelectorAll('audio, video');
+      var playing = null, fresh = null, anyBlob = null;
+      for (var i = 0; i < auds.length; i++) {
+        var a = auds[i];
+        var src = '';
+        try { src = a.currentSrc || a.getAttribute('src') || a.src || ''; } catch (e) {}
+        if (!src || src.indexOf('blob:') !== 0) continue;
+        anyBlob = a;
+        if (!a.paused) playing = a;
+        if (!snapshot[src] && a.readyState >= 2) fresh = a;
+      }
+      return { playing: playing, fresh: fresh, anyBlob: anyBlob };
+    }
+    try { toggle.click(); } catch (e) { fail('点不到播放键，再试一次'); return; }
+    var tries = 0;
+    var reclicked = false;
+    var iv = setInterval(function () {
+      tries++;
+      try {
+        var f = findAudio();
+        if (f.playing) { clearInterval(iv); grab(f.playing); return; }
+        if (f.fresh) { clearInterval(iv); grab(f.fresh); return; }
+        if (tries === 20 && !reclicked) {
+          // 5 秒没动静：可能这条本来就在播、刚被我们的点击暂停了，再点一次让它继续播
+          reclicked = true;
+          try { toggle.click(); } catch (e) {}
+          return;
+        }
+        if (tries > 44) {
+          clearInterval(iv);
+          if (f.anyBlob) { grab(f.anyBlob); return; }
+          fail('没抓到这段语音（先手动点播放听一下，再点转文字）');
+        }
+      } catch (err) {}
+    }, 250);
+  }
+
   function deliverVoice(reqId, ok, text) {
     var p = pendingVoice[reqId];
     if (!p) return;
@@ -1207,6 +1350,462 @@
       if (r && r.ok && r.text) p.out.textContent = text + '\n' + r.text;
     }).catch(function () {});
   }
+
+
+  // —— 图片消息看懂：图里的外语文字/内容，点「看图」发给视觉模型出中文
+  (function injectImgStyle() {
+    try {
+      var css = ''
+        + '.scrm-img-btn{position:absolute;left:8px;bottom:8px;z-index:6;display:inline-flex;align-items:center;gap:3px;padding:3px 10px;'
+        + 'font-size:11px;line-height:1.5;color:#fff;background:rgba(0,0,0,.55);'
+        + 'border:1px solid rgba(255,255,255,.35);border-radius:11px;cursor:pointer;font-family:inherit}'
+        + '.scrm-img-btn:hover{background:rgba(0,0,0,.78)}'
+        + '.scrm-img-text{margin-top:4px;padding:4px 8px;font-size:13px;line-height:1.6;color:#262626;'
+        + 'background:rgba(0,0,0,.04);border-left:2px solid #005dff;border-radius:4px;white-space:pre-wrap;'
+        + 'word-break:break-word}'
+        + '.scrm-img-text-out{background:#fff;border:1px solid rgba(0,0,0,.08);border-left:2px solid #005dff;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,.12);margin:6px 0 2px}';
+      var st = document.createElement('style');
+      st.id = 'scrm-img-style';
+      st.textContent = css;
+      (document.head || document.documentElement).appendChild(st);
+    } catch (e) {}
+  })();
+
+  var imgReqId = 0;
+  var pendingImg = {};
+
+  function imgHosts() {
+    return safe(function () {
+      var out = [];
+      var imgs = document.querySelectorAll('img');
+      for (var i = 0; i < imgs.length; i++) {
+        var im = imgs[i];
+        var src = im.currentSrc || im.getAttribute('src') || im.src || '';
+        if (!src || src.indexOf('data:image/svg') === 0) continue;
+        var w = im.naturalWidth || im.width || 0;
+        var h = im.naturalHeight || im.height || 0;
+        if (w < 120 || h < 90) continue;
+        try {
+          if (im.closest('[data-scrm]')) continue;
+          if (im.closest('[class*="avatar" i], [class*="profile-pic" i]')) continue;
+        } catch (e) {}
+        var host = null;
+        try {
+          host = im.closest('.message-in, .message-out, .bubble, [data-testid="msg-container"], [class*="message"], [class*="bubble"]');
+        } catch (e2) {}
+        if (!host) host = im.parentElement;
+        if (!host) continue;
+        out.push({ img: im, host: host });
+      }
+      return out;
+    }, []);
+  }
+
+  // 找紧贴图片的那层容器：Web K 的 .bubble 是整行，按钮挂它会落到气泡外下方；
+  // 沿图片父级往上找第一层「盒子尺寸≈图片尺寸」的容器当锚点，按钮压在图片左下角。
+  function imgAnchor(im, host) {
+    try {
+      var ir = im.getBoundingClientRect();
+      if (!ir.width) return host;
+      var el = im.parentElement, best = null;
+      for (var k = 0; k < 4 && el && el !== document.body; k++) {
+        var r = el.getBoundingClientRect();
+        if (r.width && r.width <= ir.width + 48 && r.height <= ir.height + 48) { best = el; el = el.parentElement; }
+        else break;
+      }
+      return best || host;
+    } catch (e) { return host; }
+  }
+
+  // 可视气泡盒：host 常是整行容器，真正的气泡是它里面包着内容的那一层子元素
+  function visualBox(el, host) {
+    try {
+      if (!host || !el || !host.contains(el)) return host;
+      var n = el;
+      while (n.parentElement && n.parentElement !== host) n = n.parentElement;
+      if (n === el) return host;
+      return n;
+    } catch (e) { return host; }
+  }
+
+  function ensureImgButtons() {
+    try {
+      var list = imgHosts();
+      for (var i = 0; i < list.length; i++) {
+        var host = list[i].host;
+        if (!host || !host.querySelector) continue;
+        var anchor = imgAnchor(list[i].img, host);
+        if (anchor.querySelector('.scrm-img-btn')) continue;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'scrm-img-btn';
+        btn.setAttribute('data-scrm', 'tool-ui');
+        btn.textContent = '看图';
+        try { if (window.getComputedStyle(anchor).position === 'static') anchor.style.position = 'relative'; } catch (e) {}
+        (function (h, im, b) {
+          b.addEventListener('click', function (ev) {
+            try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+            askImage(im, h, b);
+          });
+        })(host, list[i].img, btn);
+        anchor.appendChild(btn);
+      }
+    } catch (e) {}
+  }
+
+  function imgToDataUrl(src) {
+    return fetch(src).then(function (r) { return r.blob(); }).then(function (blob) {
+      return new Promise(function (resolve, reject) {
+        var url = URL.createObjectURL(blob);
+        var im = new Image();
+        im.onload = function () {
+          try {
+            var max = 1280;
+            var w = im.naturalWidth, h = im.naturalHeight;
+            if ((w <= max && h <= max) || !w || !h) {
+              URL.revokeObjectURL(url);
+              var fr = new FileReader();
+              fr.onload = function () { resolve(String(fr.result || '')); };
+              fr.onerror = reject;
+              fr.readAsDataURL(blob);
+              return;
+            }
+            var sc = max / Math.max(w, h);
+            var c = document.createElement('canvas');
+            c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+            c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+            URL.revokeObjectURL(url);
+            resolve(c.toDataURL('image/jpeg', 0.85));
+          } catch (e) { reject(e); }
+        };
+        im.onerror = reject;
+        im.src = url;
+      });
+    });
+  }
+
+  function askImage(img, host, btn) {
+    if (btn.getAttribute('data-busy') === '1') return;
+    if (!ipc) return;
+    var target = img;
+    try {
+      var all = host.querySelectorAll('img');
+      var best = 0;
+      for (var i = 0; i < all.length; i++) {
+        var a = (all[i].naturalWidth || 0) * (all[i].naturalHeight || 0);
+        if (a > best) { best = a; target = all[i]; }
+      }
+    } catch (e) {}
+    btn.setAttribute('data-busy', '1');
+    btn.textContent = '看图中…';
+    var out = host.querySelector('.scrm-img-text');
+    if (!out && host.parentNode && host.nextElementSibling && host.nextElementSibling.classList && host.nextElementSibling.classList.contains('scrm-img-text')) out = host.nextElementSibling;
+    if (!out) {
+      out = document.createElement('div');
+      out.className = 'scrm-img-text';
+      out.setAttribute('data-scrm', 'tool-ui');
+      // 纯图片气泡里没地方放结果框：挂到气泡下方（外部卡片）；带文字的气泡仍放内部
+      var mediaOnly = false;
+      try {
+        var __cl = host.cloneNode(true);
+        var __junk = __cl.querySelectorAll('[data-scrm], .time, .message-time, img, svg, video');
+        for (var __q = 0; __q < __junk.length; __q++) __junk[__q].remove();
+        mediaOnly = !!host.querySelector('img') && !String(__cl.textContent || '').trim();
+      } catch (e) {}
+      if (mediaOnly && host.parentNode) {
+        out.classList.add('scrm-img-text-out');
+        host.parentNode.insertBefore(out, host.nextSibling);
+      } else {
+        visualBox(target, host).appendChild(out);
+      }
+    }
+    out.textContent = '正在取图…';
+    var src = target.currentSrc || target.getAttribute('src') || target.src || '';
+    imgToDataUrl(src).then(function (dataUrl) {
+      if (!dataUrl) throw new Error('empty');
+      var id = 'i' + (++imgReqId);
+      pendingImg[id] = { btn: btn, out: out };
+      out.textContent = '正在识别图片…（首次可能要几秒）';
+      ipc.sendToHost('yichat:img-req', { reqId: id, dataUrl: dataUrl });
+      setTimeout(function () {
+        if (!pendingImg[id]) return;
+        delete pendingImg[id];
+        try { btn.removeAttribute('data-busy'); btn.textContent = '看图'; } catch (e) {}
+        out.textContent = '识别超时了，稍后再点一次';
+      }, 90000);
+    }).catch(function () {
+      try { btn.removeAttribute('data-busy'); btn.textContent = '看图'; } catch (e) {}
+      out.textContent = '取不到这张图（先点开大图，等它加载完再试）';
+    });
+  }
+
+  function deliverImage(reqId, ok, text) {
+    var p = pendingImg[reqId];
+    if (!p) return;
+    delete pendingImg[reqId];
+    try { p.btn.removeAttribute('data-busy'); p.btn.textContent = '重新看图'; } catch (e) {}
+    p.out.textContent = ok && text ? String(text) : String(text || '识别失败');
+  }
+
+
+  // ================= 语音发送（TTS）：面板打字 → 合成 → 转 ogg/opus → 粘贴塞进聊天 =================
+  var pendingTts = {};
+  var ttsSeq = 0;
+  var ttsUi = null;
+
+  function deliverTts(reqId, d) {
+    var f = pendingTts[reqId];
+    if (!f) return;
+    delete pendingTts[reqId];
+    try { f(d || {}); } catch (e) {}
+  }
+
+  function b64ToBlob(b64, mime) {
+    var bin = atob(b64);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime || 'audio/wav' });
+  }
+
+  function findComposer() {
+    var sels = ['.input-message-input[contenteditable]', '.input-message-input', '.chat-input [contenteditable]', '[contenteditable="true"]'];
+    for (var i = 0; i < sels.length; i++) {
+      var list = document.querySelectorAll(sels[i]);
+      for (var j = list.length - 1; j >= 0; j--) {
+        var el = list[j];
+        if (el.getClientRects && el.getClientRects().length) return el;
+      }
+    }
+    return null;
+  }
+
+  // WAV → 真·Ogg/Opus（Telegram 语音条格式）：WebCodecs 编码 + Ogg 封装；失败返回 null
+  function oggOpusFromBlob(blob) {
+    return new Promise(function (resolve) {
+      var done = function (f) { resolve(f || null); };
+      try {
+        if (!window.AudioEncoder || !window.AudioData) { done(null); return; }
+        AudioEncoder.isConfigSupported({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1, bitrate: 32000 }).then(function (sup) {
+          if (!sup || !sup.supported) { done(null); return; }
+          blob.arrayBuffer().then(function (arrayBuffer) {
+            var off = new OfflineAudioContext(1, 1, 48000);
+            off.decodeAudioData(arrayBuffer).then(function (buf) {
+              var len = Math.ceil(buf.duration * 48000);
+              var oc = new OfflineAudioContext(1, len, 48000);
+              var src0 = oc.createBufferSource(); src0.buffer = buf; src0.connect(oc.destination); src0.start();
+              return oc.startRendering();
+            }).then(function (pcmBuf) {
+              var pcm = pcmBuf.getChannelData(0);
+              var crcTable = new Uint32Array(256);
+              for (var i = 0; i < 256; i++) { var r = i << 24; for (var j = 0; j < 8; j++) r = (r & 0x80000000) ? ((r << 1) ^ 0x04c11db7) : (r << 1); crcTable[i] = r >>> 0; }
+              function oggCrc(bytes) { var c = 0; for (var i = 0; i < bytes.length; i++) c = ((c << 8) >>> 0) ^ crcTable[((c >>> 24) ^ bytes[i]) & 0xff]; return c >>> 0; }
+              var serial = 0x5943;
+              function makePage(packets, granule, seq, flags) {
+                var segs = []; var bodyLen = 0; var k;
+                for (k = 0; k < packets.length; k++) { bodyLen += packets[k].length; var n = packets[k].length; while (n >= 255) { segs.push(255); n -= 255; } segs.push(n); }
+                var head = new Uint8Array(27 + segs.length);
+                head.set([0x4f, 0x67, 0x67, 0x53, 0], 0); head[5] = flags;
+                var dv = new DataView(head.buffer);
+                dv.setBigUint64(6, BigInt(granule), true); dv.setUint32(14, serial, true); dv.setUint32(18, seq, true); dv.setUint32(22, 0, true);
+                head[26] = segs.length; head.set(segs, 27);
+                var page = new Uint8Array(head.length + bodyLen);
+                page.set(head, 0); var off2 = head.length;
+                for (k = 0; k < packets.length; k++) { page.set(packets[k], off2); off2 += packets[k].length; }
+                new DataView(page.buffer).setUint32(22, oggCrc(page), true);
+                return page;
+              }
+              var preskip = 312;
+              var headPkt = new Uint8Array(19);
+              headPkt.set([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64, 1, 1], 0);
+              var hdv = new DataView(headPkt.buffer); hdv.setUint16(12, preskip, true); hdv.setUint32(14, 48000, true); hdv.setInt16(16, 0, true); headPkt[18] = 0;
+              var vendor = new TextEncoder().encode('YiChat');
+              var tagsPkt = new Uint8Array(8 + 4 + vendor.length + 4);
+              tagsPkt.set([0x4f, 0x70, 0x75, 0x73, 0x54, 0x61, 0x67, 0x73], 0);
+              var tdv = new DataView(tagsPkt.buffer); tdv.setUint32(8, vendor.length, true); tagsPkt.set(vendor, 12); tdv.setUint32(12 + vendor.length, 0, true);
+              var packets = [];
+              var failed = false;
+              var enc = new AudioEncoder({
+                output: function (chunk) { var b = new Uint8Array(chunk.byteLength); chunk.copyTo(b); packets.push(b); },
+                error: function () { failed = true; }
+              });
+              enc.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1, bitrate: 32000 });
+              var frame = 9600; var ts = 0;
+              for (var o = 0; o < pcm.length; o += frame) {
+                var n = Math.min(frame, pcm.length - o);
+                var ad = new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: n, numberOfChannels: 1, timestamp: Math.round(ts * 1e6 / 48000), data: pcm.slice(o, o + n).buffer });
+                enc.encode(ad); ad.close(); ts += n;
+              }
+              enc.flush().then(function () {
+                try { enc.close(); } catch (e) {}
+                if (failed || !packets.length) { done(null); return; }
+                var pages = [];
+                pages.push(makePage([headPkt], 0, 0, 0x02));
+                pages.push(makePage([tagsPkt], 0, 1, 0x00));
+                var seq = 2; var granule = 0; var per = 50;
+                for (var i2 = 0; i2 < packets.length; i2 += per) {
+                  var group = packets.slice(i2, i2 + per);
+                  granule += group.length * 960;
+                  var isLast = i2 + per >= packets.length;
+                  if (isLast) granule = ts;
+                  pages.push(makePage(group, granule, seq++, isLast ? 0x04 : 0x00));
+                }
+                var total = 0; var q;
+                for (q = 0; q < pages.length; q++) total += pages[q].length;
+                var out = new Uint8Array(total); var oo = 0;
+                for (q = 0; q < pages.length; q++) { out.set(pages[q], oo); oo += pages[q].length; }
+                done(new File([out], 'voice.ogg', { type: 'audio/ogg' }));
+              }).catch(function () { done(null); });
+            }).catch(function () { done(null); });
+          }).catch(function () { done(null); });
+        }).catch(function () { done(null); });
+      } catch (e) { done(null); }
+    });
+  }
+
+  // 退路：MediaRecorder 转 opus 容器（webm/ogg），再不行用原 WAV
+  function mediaRecorderFile(blob) {
+    return new Promise(function (resolve) {
+      var fallback = function () { resolve(new File([blob], 'voice.wav', { type: blob.type || 'audio/wav' })); };
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC || !window.MediaRecorder) { fallback(); return; }
+        var mime = '';
+        if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) mime = 'audio/ogg;codecs=opus';
+        else if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mime = 'audio/webm;codecs=opus';
+        if (!mime) { fallback(); return; }
+        blob.arrayBuffer().then(function (ab) {
+          var ctx = new AC();
+          if (ctx.resume) ctx.resume();
+          ctx.decodeAudioData(ab).then(function (buf) {
+            var dest = ctx.createMediaStreamDestination();
+            var srcNode = ctx.createBufferSource();
+            srcNode.buffer = buf;
+            srcNode.connect(dest);
+            var rec = new MediaRecorder(dest.stream, { mimeType: mime });
+            var chunks = [];
+            rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+            rec.onstop = function () {
+              var out = new Blob(chunks, { type: mime });
+              try { ctx.close(); } catch (e) {}
+              resolve(new File([out], mime.indexOf('ogg') >= 0 ? 'voice.ogg' : 'voice.webm', { type: mime }));
+            };
+            rec.start();
+            srcNode.start();
+            srcNode.onended = function () { setTimeout(function () { try { rec.stop(); } catch (e) {} }, 150); };
+          }).catch(fallback);
+        }).catch(fallback);
+      } catch (e) { fallback(); }
+    });
+  }
+
+  function voiceFileFromBlob(blob) {
+    return oggOpusFromBlob(blob).then(function (f) {
+      if (f) return f;
+      return mediaRecorderFile(blob);
+    });
+  }
+
+  function injectVoiceFile(file) {
+    var ed = findComposer();
+    if (!ed) return false;
+    try { ed.focus(); } catch (e) {}
+    try {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      var ev;
+      try { ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }); }
+      catch (e2) { ev = document.createEvent('Event'); ev.initEvent('paste', true, true); ev.clipboardData = dt; }
+      ed.dispatchEvent(ev);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function buildTtsUi() {
+    var btn = document.createElement('button');
+    btn.id = 'ycTtsBtn';
+    btn.setAttribute('data-scrm', 'tool-ui');
+    btn.textContent = '🎙';
+    btn.title = '语音发送（合成）';
+    btn.style.cssText = 'position:fixed;right:14px;bottom:96px;z-index:2147483000;width:44px;height:44px;border-radius:50%;border:none;background:#2f6bff;color:#fff;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;align-items:center;justify-content:center;';
+    var panel = document.createElement('div');
+    panel.id = 'ycTtsPanel';
+    panel.setAttribute('data-scrm', 'tool-ui');
+    panel.style.cssText = 'position:fixed;right:14px;bottom:148px;z-index:2147483000;width:330px;max-width:92vw;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:14px;box-shadow:0 10px 34px rgba(0,0,0,.28);padding:12px;display:none;font-family:inherit;color:#1c2733;';
+    panel.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+      '<b style="font-size:14px;">🎙 语音发送</b>' +
+      '<span id="ycTtsX" style="cursor:pointer;color:#8a9ba8;font-size:15px;padding:0 2px;">✕</span></div>' +
+      '<textarea id="ycTtsText" rows="3" placeholder="输入要说的话（中文会自动翻成英文）" style="width:100%;box-sizing:border-box;border:1px solid rgba(0,0,0,.16);border-radius:9px;padding:7px 9px;font-size:13.5px;line-height:1.5;resize:vertical;font-family:inherit;"></textarea>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;">' +
+      '<label style="font-size:12.5px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="ycTtsTr" checked>自动翻成英文</label>' +
+      '<span style="font-size:12.5px;color:#5b6b7a;">音色</span>' +
+      '<select id="ycTtsVoice" style="font-size:12.5px;padding:3px 6px;border-radius:7px;border:1px solid rgba(0,0,0,.16);"></select></div>' +
+      '<div id="ycTtsSpoken" style="display:none;font-size:12.5px;color:#2b3a55;background:rgba(0,0,0,.045);border-radius:8px;padding:6px 9px;margin-bottom:8px;"></div>' +
+      '<audio id="ycTtsAudio" controls style="display:none;width:100%;height:34px;margin-bottom:8px;"></audio>' +
+      '<div style="display:flex;gap:8px;">' +
+      '<button id="ycTtsGo" style="flex:1;background:#2f6bff;color:#fff;border:none;border-radius:9px;padding:8px 0;font-size:13.5px;cursor:pointer;">生成并填入聊天</button></div>' +
+      '<div id="ycTtsStatus" style="font-size:12px;color:#7a8a99;margin-top:7px;line-height:1.5;"></div>';
+    document.body.appendChild(btn);
+    document.body.appendChild(panel);
+    var voices = ['茉莉', '冰糖', 'Mia', 'Chloe', '苏打', '白桦', 'Milo', 'Dean'];
+    var sel = panel.querySelector('#ycTtsVoice');
+    voices.forEach(function (v) {
+      var o = document.createElement('option');
+      o.value = v; o.textContent = v;
+      sel.appendChild(o);
+    });
+    var status = panel.querySelector('#ycTtsStatus');
+    var spoken = panel.querySelector('#ycTtsSpoken');
+    var audio = panel.querySelector('#ycTtsAudio');
+    var goBtn = panel.querySelector('#ycTtsGo');
+    var setStatus = function (t) { status.textContent = t || ''; };
+    btn.addEventListener('click', function () {
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      if (panel.style.display === 'block') { var ta = panel.querySelector('#ycTtsText'); if (ta) ta.focus(); }
+    });
+    panel.querySelector('#ycTtsX').addEventListener('click', function () { panel.style.display = 'none'; });
+    goBtn.addEventListener('click', function () {
+      var text = panel.querySelector('#ycTtsText').value.trim();
+      if (!text) { setStatus('先输入要说的话'); return; }
+      if (!ipc || !ipc.sendToHost) { setStatus('当前版本不支持'); return; }
+      var id = 't' + (++ttsSeq) + '_' + Date.now();
+      goBtn.disabled = true;
+      goBtn.style.opacity = '.55';
+      setStatus('正在合成…');
+      pendingTts[id] = function (d) {
+        goBtn.disabled = false;
+        goBtn.style.opacity = '';
+        if (!d.ok || !d.audioBase64) { setStatus(d.text || '合成失败'); return; }
+        if (d.spoken) { spoken.style.display = 'block'; spoken.textContent = '将发送：' + d.spoken; }
+        var blob = b64ToBlob(d.audioBase64, d.mime);
+        audio.src = URL.createObjectURL(blob);
+        audio.style.display = 'block';
+        setStatus('已生成，正在转成 Telegram 语音格式…');
+        voiceFileFromBlob(blob).then(function (file) {
+          var okIn = injectVoiceFile(file);
+          if (okIn) setStatus('已生成 ✓ 已放入聊天——如果输入框上方出现语音附件预览，按 Telegram 的发送键发出；没出现的话告诉我，我换一种塞法。也可以先点上方播放器试听。');
+          else setStatus('已生成 ✓ 但没找到聊天输入框——先点开一个对话再试；也可以先试听。');
+        });
+      };
+      ipc.sendToHost('yichat:tts-req', { reqId: id, text: text, voice: sel.value, translate: panel.querySelector('#ycTtsTr').checked });
+      setTimeout(function () {
+        if (pendingTts[id]) { delete pendingTts[id]; goBtn.disabled = false; goBtn.style.opacity = ''; setStatus('合成超时，请重试'); }
+      }, 60000);
+    });
+    return { btn: btn, panel: panel };
+  }
+
+  function ensureTtsUi() {
+    try {
+      if (!document.body) return;
+      if (!ttsUi) ttsUi = buildTtsUi();
+      var has = !!findComposer();
+      ttsUi.btn.style.display = has ? 'flex' : 'none';
+      if (!has) ttsUi.panel.style.display = 'none';
+    } catch (e) {}
+  }
+  setInterval(ensureTtsUi, 2000);
 
   // IPC 直达通道：宿主用 webview.send 下发配置/译文，不依赖 window 对象在主世界可见
   if (ipc && ipc.on) {
@@ -1229,6 +1828,15 @@
       });
       ipc.on('yichat:voice-scan', function () {
         try { ensureVoiceButtons(); } catch (e) {}
+      });
+      ipc.on('yichat:img-res', function (ev, d) {
+        try { if (d) deliverImage(d.reqId, d.ok, d.text); } catch (e) {}
+      });
+      ipc.on('yichat:tts-res', function (ev, d) {
+        try { if (d) deliverTts(d.reqId, d); } catch (e) {}
+      });
+      ipc.on('yichat:img-scan', function () {
+        try { ensureImgButtons(); } catch (e) {}
       });
     } catch (e) {}
   }

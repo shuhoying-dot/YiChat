@@ -92,6 +92,18 @@ function errMessage(e) {
   return '网络错误：' + String((e && e.message) || e);
 }
 
+// 错误人话化（UI 规矩第 6 条）：HTTP 状态 → 人话原因＋下一步，原文截断附后备查
+function humanHttp(status, body) {
+  var raw = String(body || '').slice(0, 120);
+  var tail = raw ? '（原始错误：' + raw + '）' : '';
+  if (status === 401 || status === 403) return 'Key 不对或已失效：到 设置 → API Key 里检查这把 Key，或换一把再试' + tail;
+  if (status === 402) return '余额不足或服务未开通：到服务商后台看下额度与开通状态' + tail;
+  if (status === 404) return '地址或模型名不对：到 设置 → API Key 里核对 Base URL 和模型名' + tail;
+  if (status === 429) return '请求太频繁或额度用完了：等一两分钟再试，或换一把 Key' + tail;
+  if (status >= 500) return '服务商那边出问题了（HTTP ' + status + '）：等几分钟再试' + tail;
+  return '请求失败（HTTP ' + status + '）' + tail;
+}
+
 // ---------- DeepL 翻译（免费版 :fx / 付费版自动识别） ----------
 function deeplBase(key) {
   return String(key || '').trim().endsWith(':fx')
@@ -122,7 +134,7 @@ async function deeplTestKey(key) {
     if (res.ok) return { ok: true, message: '连接成功，Key 有效' };
     if (res.status === 403) return { ok: false, message: 'Key 无效（403 未授权）' };
     const body = await res.text().catch(() => '');
-    return { ok: false, message: `请求失败（HTTP ${res.status}）：${body.slice(0, 160)}` };
+    return { ok: false, message: `${humanHttp(res.status, body)}` };
   } catch (e) {
     return { ok: false, message: errMessage(e) };
   }
@@ -145,7 +157,7 @@ async function deeplTranslate(key, text, targetLang) {
       if (res.status === 403) return { ok: false, message: 'Key 无效（403 未授权）' };
       if (res.status === 456) return { ok: false, message: 'DeepL 免费额度已用完' };
       const body = await res.text().catch(() => '');
-      return { ok: false, message: `请求失败（HTTP ${res.status}）：${body.slice(0, 160)}` };
+      return { ok: false, message: `${humanHttp(res.status, body)}` };
     }
     const data = await res.json();
     const translated = (data.translations || []).map((x) => x.text || '').join('');
@@ -181,7 +193,7 @@ async function testKey(entry) {
       if (res.ok) return { ok: true, message: '连接成功，Key 有效' };
       if (res.status === 401) return { ok: false, message: 'Key 无效（401 未授权）' };
       const body = await res.text().catch(() => '');
-      return { ok: false, message: `请求失败（HTTP ${res.status}）：${body.slice(0, 160)}` };
+      return { ok: false, message: `${humanHttp(res.status, body)}` };
     }
     if (entry.type === 'Gemini') {
       const res = await fetchTimeout(
@@ -189,7 +201,7 @@ async function testKey(entry) {
       );
       if (res.ok) return { ok: true, message: '连接成功，Key 有效' };
       if (res.status === 400 || res.status === 403) return { ok: false, message: 'Key 无效或无权限' };
-      return { ok: false, message: `请求失败（HTTP ${res.status}）` };
+      return { ok: false, message: `${humanHttp(res.status, '')}` };
     }
     // OpenAI / DeepSeek / 自定义：OpenAI 兼容，GET /models 即可校验
     const res = await fetchTimeout(baseOf(entry) + '/models', {
@@ -197,7 +209,7 @@ async function testKey(entry) {
     });
     if (res.ok) return { ok: true, message: '连接成功，Key 有效' };
     if (res.status === 401) return { ok: false, message: 'Key 无效（401 未授权）' };
-    return { ok: false, message: `请求失败（HTTP ${res.status}）` };
+    return { ok: false, message: `${humanHttp(res.status, '')}` };
   } catch (e) {
     return { ok: false, message: errMessage(e) };
   }
@@ -208,6 +220,12 @@ async function chat(entry, messages, maxTokens = 500) {
   const key = String(entry.key || '').trim();
   if (!key) return { ok: false, message: 'Key 为空' };
   const model = modelOf(entry);
+  // 语音识别模型（如 mimo-v2.5-asr）只收音频：拿它做文字活（翻译/看图/帮写）必然 400，
+  // 提前拦下说清，让用户改选文字模型，别把服务商的英文报错原样甩给他（他已连撞三次）
+  if (/asr|whisper|transcribe/i.test(model)) {
+    const hasAudio = Array.isArray(messages) && messages.some((m) => Array.isArray(m && m.content) && m.content.some((c) => c && c.type === 'input_audio'));
+    if (!hasAudio) return { ok: false, message: '选错 Key 了：这是语音识别模型（' + model + '），只能转语音、不能处理文字。请改选「小米看图」（mimo-v2.6-flash）那条' };
+  }
   try {
     if (entry.type === 'Claude') {
       const res = await fetchTimeout('https://api.anthropic.com/v1/messages', {
@@ -223,7 +241,7 @@ async function chat(entry, messages, maxTokens = 500) {
       if (!res.ok) {
         if (res.status === 401) return { ok: false, message: 'Key 无效（401 未授权）' };
         const body = await res.text().catch(() => '');
-        return { ok: false, message: `请求失败（HTTP ${res.status}）：${body.slice(0, 160)}` };
+        return { ok: false, message: `${humanHttp(res.status, body)}` };
       }
       const data = await res.json();
       const text = (data.content || []).map((b) => b.text || '').join('');
@@ -241,7 +259,7 @@ async function chat(entry, messages, maxTokens = 500) {
       });
       if (!res.ok) {
         if (res.status === 400 || res.status === 403) return { ok: false, message: 'Key 无效或无权限' };
-        return { ok: false, message: `请求失败（HTTP ${res.status}）` };
+        return { ok: false, message: `${humanHttp(res.status, '')}` };
       }
       const data = await res.json();
       const text = (((data.candidates || [])[0] || {}).content || {}).parts
@@ -258,7 +276,7 @@ async function chat(entry, messages, maxTokens = 500) {
     if (!res.ok) {
       if (res.status === 401) return { ok: false, message: 'Key 无效（401 未授权）' };
       const body = await res.text().catch(() => '');
-      return { ok: false, message: `请求失败（HTTP ${res.status}）：${body.slice(0, 160)}` };
+      return { ok: false, message: `${humanHttp(res.status, body)}` };
     }
     const data = await res.json();
     const text = (((data.choices || [])[0] || {}).message || {}).content || '';
@@ -304,7 +322,39 @@ async function tts(entry, text, voice = 'alloy') {
     }, 60000);
     if (!res.ok) {
       if (res.status === 401) return { ok: false, message: 'Key 无效（401 未授权）' };
-      return { ok: false, message: `请求失败（HTTP ${res.status}）` };
+      if (res.status === 404) {
+        // 有些服务商（如小米 MiMo）没有 /audio/speech 接口，语音合成走对话接口：
+        // 要合成的文本放在 assistant 消息里（官方规矩），audio 参数指定音色，
+        // 返回 choices[0].message.audio.data（base64 的 wav）。条目里配了 TTS 模型才走这条。
+        const ttsChatModel = String(
+          entry.ttsModel || (/tts/i.test(String(entry.model || '')) ? entry.model : '')
+        ).trim();
+        if (ttsChatModel) {
+          try {
+            const MIMO_VOICES = ['mimo_default', '冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean'];
+            const v = MIMO_VOICES.indexOf(String(voice || '')) >= 0 ? String(voice) : 'mimo_default';
+            const r2 = await fetchTimeout(baseOf(entry) + '/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+              body: JSON.stringify({
+                model: ttsChatModel,
+                messages: [{ role: 'assistant', content: t.slice(0, 2000) }],
+                audio: { format: 'wav', voice: v },
+              }),
+            }, 90000);
+            if (r2.ok) {
+              const d2 = await r2.json().catch(() => null);
+              const msg2 = d2 && d2.choices && d2.choices[0] && d2.choices[0].message;
+              const b64 = msg2 && msg2.audio && msg2.audio.data;
+              if (b64) return { ok: true, audioBase64: String(b64), mime: 'audio/wav' };
+              return { ok: false, message: '语音合成没返回音频（模型或音色不对）' };
+            }
+            const b2 = await r2.text().catch(() => '');
+            return { ok: false, message: `语音合成失败（HTTP ${r2.status}）：${b2.slice(0, 160)}` };
+          } catch (e2) {}
+        }
+      }
+      return { ok: false, message: `${humanHttp(res.status, '')}` };
     }
     const buf = Buffer.from(await res.arrayBuffer());
     return { ok: true, audioBase64: buf.toString('base64'), mime: 'audio/mpeg' };
@@ -350,7 +400,34 @@ async function transcribe(entry, audioBase64, mime, lang) {
     }, 90000);
     if (!res.ok) {
       if (res.status === 401) return { ok: false, message: 'Key 无效（401 未授权）' };
-      if (res.status === 404) return { ok: false, message: '接口不存在（404）：这个 Key 的地址不支持语音识别' };
+      if (res.status === 404) {
+        // 有些服务商（如小米 MiMo）没有 whisper 式接口，语音识别走对话接口的 input_audio：
+        // 条目里配了 ASR 模型（asrModel，或 model 本身带 asr）且音频是 wav/mp3 时改走这条再试。
+        const asrChatModel = String(
+          entry.asrModel || (/asr/i.test(String(entry.model || '')) ? entry.model : '')
+        ).trim();
+        const fmt = ext === 'wav' ? 'wav' : ext === 'mp3' ? 'mp3' : '';
+        if (asrChatModel && fmt) {
+          try {
+            const r2 = await fetchTimeout(baseOf(entry) + '/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+              body: JSON.stringify({
+                model: asrChatModel,
+                messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: b64, format: fmt } }] }],
+                max_tokens: 2000,
+              }),
+            }, 90000);
+            if (r2.ok) {
+              const d2 = await r2.json().catch(() => null);
+              const t2 = d2 && d2.choices && d2.choices[0] && d2.choices[0].message && d2.choices[0].message.content;
+              if (t2 && String(t2).trim()) return { ok: true, text: String(t2).trim() };
+              return { ok: false, message: '识别结果为空（可能是静音或格式不支持）' };
+            }
+          } catch (e2) {}
+        }
+        return { ok: false, message: '接口不存在（404）：这个 Key 的地址不支持语音识别' };
+      }
       const body = await res.text().catch(() => '');
       return { ok: false, message: `识别失败（HTTP ${res.status}）：${body.slice(0, 160)}` };
     }

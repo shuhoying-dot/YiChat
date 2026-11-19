@@ -2114,8 +2114,8 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 .settings .set-panel-desc { color: #667085 !important; }
 .settings .set-section-bar { border: 1px solid #e3eaf6 !important; border-bottom: none !important; border-radius: 14px 14px 0 0 !important; margin-top: 20px !important; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
 .settings .set-form { border: 1px solid #e3eaf6 !important; border-top: none !important; border-radius: 0 0 14px 14px !important; padding: 10px 18px 16px !important; background: #fff; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
-.settings-menu-item.active { background: #eef3ff !important; color: #2f6bff !important; border-color: #dbe6ff !important; box-shadow: inset 3px 0 0 #2f6bff; font-weight: 600; }
-.settings-plat-row.active { background: #eef3ff !important; color: #2f6bff !important; box-shadow: inset 3px 0 0 #2f6bff; }
+.settings-menu-item.active { background: #f0f0f0 !important; color: #262626 !important; border-color: #e0e0e0 !important; box-shadow: none; font-weight: 600; }
+.settings-plat-row.active { background: #f0f0f0 !important; color: #262626 !important; box-shadow: none; }
 .settings-menu-item:hover, .settings-plat-row:hover { background: #f5f7fa; }
 /* 「应用」栏吸底：长表单滚到哪都在面板底部，不怕忘点 */
 .settings .set-apply-row { position: sticky; bottom: 0; z-index: 6; background: #fff; padding: 10px 2px; border-top: 1px solid #eef0f3; }
@@ -2133,3 +2133,11 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 [data-theme=dark] .settings .set-apply-row { background: #1c1c1c; border-top-color: rgba(255, 255, 255, .08); }
 [data-theme=dark] .yc-plat-search { background: #242424; border-color: rgba(255, 255, 255, .14); color: #e6ebf2; }
 [data-theme=dark] .yc-warn-badge { background: rgba(212, 107, 8, .2); color: #f0a04b; }
+
+/* —— UI 规矩落地覆盖（2026-11-20 五步一次版）：快捷入口紧凑一行 / 大数字统一 24 / 顶带卡片去外边距 —— */
+#yc-wb .yc2-tiles{grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:8px!important}
+#yc-wb .yc2-tile{padding:10px 12px!important}
+#yc-wb .yc2-tile-tx span{display:none!important}
+#yc-wb .yc3-gstat-v{font-size:24px!important}
+#yc-wb .yc3-node-ms{font-size:24px!important}
+#yc-wb .yc3-toprow .yc3-card{margin:0!important}

@@ -461,11 +461,7 @@
     var dock = mkEl('div', 'yc-dock');
     dock.setAttribute('data-yc', '1');
 
-    var b1 = dockBtn('latest', '最新', SVG_DOWN, '把聊天窗口滚到最新一条消息');
-    b1.addEventListener('click', function (e) {
-      e.stopPropagation();
-      if (!scrollLatest()) { b1.title = L('先在左侧打开一个会话'); }
-    });
+    // 2026-11-20 用户点名不要「最新」键：不再生成（scrollLatest 函数保留，其他入口可能还用）
 
     var b2 = dockBtn('trans', '译文', '<span class="yc-dock-glyph">译</span>', '译文开关');
     b2.addEventListener('click', function (e) {
@@ -483,7 +479,6 @@
 
     // v21：搜记录 / 未读两个键按需求移除（未读汇总从主页未读卡打开，系统通知不受影响）
 
-    dock.appendChild(b1);
     dock.appendChild(b2);
     dock.appendChild(b3);
     dock.appendChild(b4);
@@ -510,6 +505,50 @@
       if (transOff()) { dockTick++; if (dockTick % 4 === 0) applyTransOverride(); }
       // 角标要跟着未读数走，所以每轮都同步一次（原来只在首次注入时算过，之后永不更新）
       syncUnread();
+      arrangeDock();
+    } catch (e) {}
+  }
+
+  // —— 右侧工具栏排序＋分组（2026-11-20 用户定：只做置顶＋分组，不做展开宽条）
+  // 常用置顶：话术库 / AI 帮写 / 截图 / 会话；分隔线以下：翻译 / 画像 / 素材 / 关键词 / 最新 / 译文。
+  // 只写 CSS order、不挪 DOM 节点，React 重渲染不会被打乱；每轮 tick 幂等重贴。
+  var DOCK_ORDER = { phrases: 10, ai: 20, shot: 30, translate: 60, profile: 70, material: 80, keywords: 90, trans: 110 };
+  function arrangeDock() {
+    try {
+      var bars = document.querySelectorAll('.sess-toolbar');
+      for (var i = 0; i < bars.length; i++) {
+        var bar = bars[i];
+        if (bar.classList.contains('sess-toolbar-collapsed')) {
+          var stale = bar.querySelector('.yc-dock-sep');
+          if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+          continue;
+        }
+        // 速用区拍平成 flex 子项，四个键才能和应用自带的键一起排序
+        var dock = bar.querySelector('.yc-dock');
+        if (dock && dock.style.display !== 'contents') dock.style.display = 'contents';
+        var tools = bar.querySelectorAll('.sess-tool');
+        for (var j = 0; j < tools.length; j++) {
+          var dt = tools[j].getAttribute('data-t') || '';
+          if (dt.indexOf('tool-') === 0) {
+            var k = dt.slice(5);
+            // 2026-11-20 用户点名不要「会话」键：应用自带键删不掉，每轮 tick 压住隐藏
+            if (k === 'session') { if (tools[j].style.display !== 'none') tools[j].style.setProperty('display', 'none', 'important'); continue; }
+            if (DOCK_ORDER[k] != null && tools[j].style.order !== String(DOCK_ORDER[k])) tools[j].style.order = String(DOCK_ORDER[k]);
+          }
+        }
+        var mine = bar.querySelectorAll('.yc-dock-btn');
+        for (var q = 0; q < mine.length; q++) {
+          var dk = mine[q].getAttribute('data-k') || '';
+          if (DOCK_ORDER[dk] != null && mine[q].style.order !== String(DOCK_ORDER[dk])) mine[q].style.order = String(DOCK_ORDER[dk]);
+        }
+        var sep = bar.querySelector('.yc-dock-sep');
+        if (!sep) {
+          sep = mkEl('div', 'yc-dock-sep');
+          sep.setAttribute('data-yc', '1');
+          sep.style.cssText = 'order:50;width:36px;height:1px;background:rgba(0,0,0,.14);margin:6px 0;flex-shrink:0;';
+          bar.appendChild(sep);
+        }
+      }
     } catch (e) {}
   }
 
@@ -769,16 +808,55 @@
   // —— 5) 语音转文字：页内点「转文字」→ 这里转给主进程识别（Key 用 API Key 里第一个可用的）
   function asrEntry() {
     try {
-      var arr = JSON.parse(localStorage.getItem('yichat_api_keys') || '[]');
+      var arr = JSON.parse((localStorage.getItem('yichat-api-keys') || localStorage.getItem('yichat_api_keys')) || '[]');
       if (!Array.isArray(arr)) return null;
+      var fallback = null;
       for (var i = 0; i < arr.length; i++) {
         var e = arr[i] || {};
         if (!e.key) continue;
         if (e.type === 'Claude' || e.type === 'Gemini' || e.type === 'DeepL') continue;
-        return e;
+        if (e.asrModel || /asr|whisper|transcribe/i.test(String(e.model || ''))) return e;
+        if (!fallback) fallback = e;
       }
+      return fallback;
     } catch (err) {}
     return null;
+  }
+
+  // llmAsr 实际挂在 window.scrm 上（preload 的 scrm 命名空间），不在 window.yichat 上：
+  // v14 那次「错调 scrm」的结论把这里带反了，bindVoice 用 yapi() 永远拿不到 llmAsr，
+  // 语音转文字一直回「当前版本不支持」。这里照 llmApi() 的方式先 scrm 后 yichat。
+  function asrApi() {
+    try { if (window.scrm && typeof window.scrm.llmAsr === 'function') return window.scrm; } catch (e) {}
+    try { if (window.yichat && typeof window.yichat.llmAsr === 'function') return window.yichat; } catch (e) {}
+    return null;
+  }
+
+  // —— 用量统计（本机，2026-11-20 用户点选加）：语音/看图/合成成功次数按天存，留 31 天
+  function usageDayKey(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function bumpUsage(kind) {
+    try {
+      var all = JSON.parse(localStorage.getItem('yc-usage-v1') || '{}');
+      var day = usageDayKey(new Date());
+      if (!all[day]) all[day] = { v: 0, i: 0, t: 0 };
+      all[day][kind] = (all[day][kind] || 0) + 1;
+      var keys = Object.keys(all).sort();
+      while (keys.length > 31) { delete all[keys.shift()]; }
+      localStorage.setItem('yc-usage-v1', JSON.stringify(all));
+    } catch (e) {}
+  }
+  function usageSum(days) {
+    var out = { v: 0, i: 0, t: 0 };
+    try {
+      var all = JSON.parse(localStorage.getItem('yc-usage-v1') || '{}');
+      var now = new Date();
+      for (var k = 0; k < days; k++) {
+        var r = all[usageDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - k))];
+        if (!r) continue;
+        out.v += r.v || 0; out.i += r.i || 0; out.t += r.t || 0;
+      }
+    } catch (e) {}
+    return out;
   }
 
   function bindVoice(el) {
@@ -789,7 +867,7 @@
         if (!e || e.channel !== 'yichat:voice-req') return;
         var d = e.args && e.args[0];
         if (!d) return;
-        var api = yapi();
+        var api = asrApi();
         var entry = asrEntry();
         if (!api || !api.llmAsr) {
           el.send('yichat:voice-res', { reqId: d.reqId, ok: false, text: '当前版本不支持语音识别' });
@@ -798,11 +876,12 @@
         if (!entry) {
           el.send('yichat:voice-res', {
             reqId: d.reqId, ok: false,
-            text: '还没配语音识别：设置 → API Key 里加一个 OpenAI（或自定义）Key，模型填 whisper-1',
+            text: '还没配语音识别：设置 → API Key 里加一个 OpenAI（或自定义）Key，模型填 whisper-1；用小米 MiMo 的话地址填 api.xiaomimimo.com/v1、模型填 mimo-v2.5-asr',
           });
           return;
         }
         Promise.resolve(api.llmAsr(entry, d.b64, d.mime)).then(function (r) {
+          if (r && r.ok) bumpUsage('v');
           el.send('yichat:voice-res', {
             reqId: d.reqId, ok: !!(r && r.ok),
             text: (r && (r.text || r.message)) || '识别失败',
@@ -818,6 +897,137 @@
     var list = document.querySelectorAll('webview');
     for (var i = 0; i < list.length; i++) bindVoice(list[i]);
   }
+
+  // —— 5b) 图片看懂：页内点「看图」→ 这里转给主进程视觉模型（走 llmChat 的多模态消息）
+  var IMG_PROMPT = '你是帮我看懂图片的助手，请用简体中文回复。规则：1）图片里有文字时，先逐行抄出原文，再给出中文翻译；2）没有文字时，用一两句话说清图片内容（人物/物品/场景/关键信息）；3）如果是截图、单据或聊天记录，重点说明关键信息（金额、时间、名称、联系方式等）。不要寒暄，直接给结果。';
+  function visionEntry() {
+    try {
+      var arr = JSON.parse((localStorage.getItem('yichat-api-keys') || localStorage.getItem('yichat_api_keys')) || '[]');
+      if (!Array.isArray(arr)) return null;
+      var fallback = null;
+      var asrFallback = null;
+      for (var i = 0; i < arr.length; i++) {
+        var e = arr[i] || {};
+        if (!e.key) continue;
+        if (e.type === 'Claude' || e.type === 'Gemini' || e.type === 'DeepL' || e.type === 'DeepSeek') continue;
+        if (e.type === 'OpenAI') return e;
+        if (/asr|whisper|transcribe|tts/i.test(String(e.model || ''))) { if (!asrFallback) asrFallback = e; continue; }
+        if (!fallback) fallback = e;
+      }
+      return fallback || asrFallback;
+    } catch (err) {}
+    return null;
+  }
+
+  function bindImg(el) {
+    if (!el || el.__ycImgBound) return;
+    el.__ycImgBound = true;
+    el.addEventListener('ipc-message', function (e) {
+      try {
+        if (!e || e.channel !== 'yichat:img-req') return;
+        var d = e.args && e.args[0];
+        if (!d || !d.dataUrl) return;
+        var api = llmApi();
+        var entry = visionEntry();
+        if (!api || !api.llmChat) {
+          el.send('yichat:img-res', { reqId: d.reqId, ok: false, text: '当前版本不支持看图' });
+          return;
+        }
+        if (!entry) {
+          el.send('yichat:img-res', {
+            reqId: d.reqId, ok: false,
+            text: '还没配看图模型：设置 → API Key 里加一个 OpenAI（或自定义）Key，模型填 gpt-4o-mini 这类带视觉的',
+          });
+          return;
+        }
+        var useEntry = entry.visionModel ? Object.assign({}, entry, { model: entry.visionModel }) : entry;
+        var messages = [{
+          role: 'user',
+          content: [
+            { type: 'text', text: IMG_PROMPT },
+            { type: 'image_url', image_url: { url: d.dataUrl } },
+          ],
+        }];
+        Promise.resolve(api.llmChat(useEntry, messages, 900)).then(function (r) {
+          if (r && r.ok) bumpUsage('i');
+          el.send('yichat:img-res', {
+            reqId: d.reqId, ok: !!(r && r.ok),
+            text: (r && (r.text || r.message)) || '识别失败',
+          });
+        }).catch(function (err) {
+          el.send('yichat:img-res', { reqId: d.reqId, ok: false, text: '识别失败：' + (err && err.message || err) });
+        });
+      } catch (x) {}
+    });
+  }
+
+  function bindImgAll() {
+    var list = document.querySelectorAll('webview');
+    for (var i = 0; i < list.length; i++) bindImg(list[i]);
+  }
+  // —— 5c) 语音发送：页内面板打字 →（可选）翻成英文 → TTS 合成 → 回页内塞进聊天附件
+  function ttsEntry() {
+    try {
+      var arr = JSON.parse((localStorage.getItem('yichat-api-keys') || localStorage.getItem('yichat_api_keys')) || '[]');
+      if (!Array.isArray(arr)) return null;
+      for (var i = 0; i < arr.length; i++) {
+        var e = arr[i] || {};
+        if (!e.key) continue;
+        if (/tts/i.test(String(e.model || '')) || /tts/i.test(String(e.ttsModel || ''))) return e;
+      }
+    } catch (err) {}
+    return null;
+  }
+  function bindTts(el) {
+    if (!el || el.__ycTtsBound) return;
+    el.__ycTtsBound = true;
+    el.addEventListener('ipc-message', function (e) {
+      try {
+        if (!e || e.channel !== 'yichat:tts-req') return;
+        var d = e.args && e.args[0];
+        if (!d || !d.text) return;
+        var api = llmApi();
+        var tEntry = ttsEntry();
+        if (!api || typeof api.llmTts !== 'function') {
+          el.send('yichat:tts-res', { reqId: d.reqId, ok: false, text: '当前版本不支持语音合成' });
+          return;
+        }
+        if (!tEntry) {
+          el.send('yichat:tts-res', { reqId: d.reqId, ok: false, text: '还没配语音合成：设置 → API Key 里加一条「小米合成」——同一把小米 Key、地址 api.xiaomimimo.com/v1、模型填 mimo-v2.5-tts' });
+          return;
+        }
+        var finish = function (spoken) {
+          Promise.resolve(api.llmTts(tEntry, spoken, d.voice || '茉莉')).then(function (r) {
+            if (r && r.ok) bumpUsage('t');
+            el.send('yichat:tts-res', {
+              reqId: d.reqId, ok: !!(r && r.ok), spoken: spoken,
+              audioBase64: (r && r.audioBase64) || '',
+              mime: (r && r.mime) || 'audio/wav',
+              text: (r && (r.text || r.message)) || '',
+            });
+          }).catch(function (err) {
+            el.send('yichat:tts-res', { reqId: d.reqId, ok: false, spoken: spoken, text: '合成失败：' + (err && err.message || err) });
+          });
+        };
+        var src = String(d.text || '');
+        if (d.translate && /[一-鿿]/.test(src)) {
+          var wEntry = aiEntry();
+          if (!wEntry || typeof api.llmChat !== 'function') { finish(src); return; }
+          Promise.resolve(api.llmChat(wEntry, [{ role: 'user', content: '把下面这段话翻译成自然、地道的口语英文，只输出译文，不要加任何解释：\n' + src }], 600)).then(function (r) {
+            var t = (r && r.ok && (r.text || r.message)) ? String(r.text || r.message).trim() : '';
+            finish(t || src);
+          }).catch(function () { finish(src); });
+        } else {
+          finish(src);
+        }
+      } catch (x) {}
+    });
+  }
+  function bindTtsAll() {
+    var list = document.querySelectorAll('webview');
+    for (var i = 0; i < list.length; i++) bindTts(list[i]);
+  }
+
 
   // ================= 主页工作台（v16 · 2026-11-01） =================
   // 主页原来就三块：时钟胶囊 / 「在线会话 N」/ 两张卡，剩下 400 多像素全空。
@@ -1123,6 +1333,37 @@
     }
   }
 
+  // —— 会话页账号卡未读角标：按 data-acc-id 对上账号的 unread，红点数字挂在账号名后面
+  function paintAccBadges() {
+    try {
+      var snap = acctSnapshot();
+      var byId = {};
+      for (var i = 0; i < snap.flat.length; i++) {
+        var a = snap.flat[i].acc || {};
+        if (a.id != null) byId[String(a.id)] = Number(a.unread) || 0;
+      }
+      var cards = document.querySelectorAll('.sess-acc-card');
+      for (var j = 0; j < cards.length; j++) {
+        var card = cards[j];
+        var id = card.getAttribute('data-acc-id');
+        if (id == null) continue;
+        var n = byId[String(id)] || 0;
+        var bd = card.querySelector('.yc-acc-badge');
+        if (n > 0) {
+          var host = card.querySelector('.sess-acc-name') || card;
+          if (!bd) {
+            bd = mkEl('i', 'yc-acc-badge');
+            bd.style.cssText = 'display:inline-block;background:#ff3b30;color:#fff;font-size:10px;font-style:normal;font-weight:600;line-height:1.5;min-width:16px;text-align:center;padding:0 5px;border-radius:8px;margin-left:6px;vertical-align:2px;';
+          }
+          if (bd.parentNode !== host) host.appendChild(bd);
+          var txt = n > 99 ? '99+' : String(n);
+          if (bd.textContent !== txt) bd.textContent = txt;
+          bd.style.display = 'inline-block';
+        } else if (bd) bd.style.display = 'none';
+      }
+    } catch (e) {}
+  }
+
   // 今日目标（进度环点击循环切换，存本机）
   function cycleGoal() {
     var steps = [100, 200, 300, 500, 1000];
@@ -1143,11 +1384,14 @@
   var aiState = { lang: '英语', tone: '礼貌', text: '' };
   function aiEntry() {
     try {
-      var arr = JSON.parse(localStorage.getItem('yichat_api_keys') || '[]');
+      var arr = JSON.parse((localStorage.getItem('yichat-api-keys') || localStorage.getItem('yichat_api_keys')) || '[]');
       if (!Array.isArray(arr)) return null;
       for (var i = 0; i < arr.length; i++) {
         var e = arr[i] || {};
-        if (e.key) return e;
+        if (!e.key) continue;
+        // 语音类模型（ASR/TTS）干不了写文字的活，跳过——否则会报 ASR requires input_audio
+        if (/asr|whisper|transcribe|tts/i.test(String(e.model || ''))) continue;
+        return e;
       }
     } catch (err) {}
     return null;
@@ -1364,24 +1608,45 @@
       acc.appendChild(dd);
     });
     gact.appendChild(acc);
+    // 深色切换钮（第 4 步）：优先点应用自带的 theme-switch，没有就直接翻 data-theme（样式表已带整套深色变量）
+    var thb = mkEl('span', 'yc3-theme-btn', '🌙');
+    thb.id = 'ycThemeBtn';
+    thb.title = L('切换深色 / 浅色');
+    thb.setAttribute('data-yc', '1');
+    thb.style.cssText = 'cursor:pointer;font-size:15px;margin-left:10px;';
+    thb.addEventListener('click', function () {
+      // 应用自带的 theme-switch 是下拉菜单钮（点它只弹菜单），这里直接切属性＋发同款 yichat-theme 事件让应用状态同步
+      var de = document.documentElement;
+      var dark = de.getAttribute('data-theme') !== 'dark';
+      de.setAttribute('data-theme', dark ? 'dark' : 'light');
+      try { window.dispatchEvent(new CustomEvent('yichat-theme', { detail: { mode: dark ? 'dark' : 'light', dark: dark } })); } catch (e) {}
+    });
+    gact.appendChild(thb);
     gr.appendChild(gact);
     wb.appendChild(gr);
+    // 异常提醒条：平时藏着，出事（节点偏慢/失败多/Key 缺失/平台掉线）才出现，可关、异常集合变了再出
+    var alBar = mkEl('div', 'yc3-alert');
+    alBar.id = 'ycAlert';
+    alBar.style.cssText = 'display:none;border:1px solid;border-radius:12px;padding:10px 16px;margin-bottom:var(--wb-gap);font-size:13px;line-height:1.9;';
+    wb.appendChild(alBar);
 
     // ③ 两栏
     var cols = mkEl('div', 'yc3-cols');
     var left = mkEl('div', 'yc3-left');
 
+    // 快捷入口（第 2 步改版：下沉到图表下方、紧凑一行，见编译 CSS 的 6 列覆盖）
+    var qw = mkEl('div', 'yc3-quick-wrap');
     var sh = mkEl('div', 'yc2-sect');
     sh.appendChild(mkEl('b', '', L('快捷入口')));
     var etb = mkEl('span', 'yc3-sect-edit', L('编辑'));
     etb.setAttribute('data-act', 'tiles-edit');
     etb.setAttribute('data-yc', '1');
     sh.appendChild(etb);
-    left.appendChild(sh);
+    qw.appendChild(sh);
     var tiles = mkEl('div', 'yc2-tiles');
-    left.appendChild(tiles);
+    qw.appendChild(tiles);
     var hrow = mkEl('div', 'yc3-hidden-row');
-    left.appendChild(hrow);
+    qw.appendChild(hrow);
     renderTiles(wb);
 
     // 近 7 天翻译量（本机统计 history，paint 填充）
@@ -1398,7 +1663,7 @@
     goalEl.setAttribute('data-yc', '1');
     goalEl.innerHTML = '<svg width="30" height="30" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(127,127,127,.18)" stroke-width="3.5"/><circle class="yc3-goal-fg" cx="18" cy="18" r="15.5" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="97.4" stroke-dashoffset="97.4" transform="rotate(-90 18 18)"/></svg>';
     goalEl.appendChild(mkEl('span', 'yc3-goal-t', ''));
-    chH.appendChild(goalEl);
+    // 第 2 步：目标环与「已超额」一并去掉（假警报）——goalEl 不再挂进标题行，paint 的目标段随之失效
     chH.appendChild(chTot);
     chart.appendChild(chH);
     chart.appendChild(mkEl('div', 'yc3-chart'));
@@ -1421,48 +1686,63 @@
       tips.appendChild(ts);
     }
     chart.appendChild(tips);
+    left.appendChild(qw);
     cols.appendChild(left);
+
+    // 顶带（第 2 步）：待处理置顶——未读（宽）＋平台状态（定宽 302 与右栏齐）
+    var toprow = mkEl('div', 'yc3-toprow');
+    toprow.style.cssText = 'display:flex;gap:var(--wb-gap);margin-bottom:var(--wb-gap);align-items:flex-start;';
 
     // 右栏
     var right = mkEl('div', 'yc3-right');
 
     var pc3 = mkEl('div', 'yc3-card');
+    pc3.style.cssText = 'width:302px;flex:none;';
     var pcH = mkEl('div', 'yc3-card-h');
     pcH.appendChild(mkEl('b', '', L('平台状态')));
     pcH.appendChild(mkEl('span', 'yc3-card-s yc3-plats-sub', ''));
     pc3.appendChild(pcH);
     pc3.appendChild(mkEl('div', 'yc3-plats'));
-    right.appendChild(pc3);
+    var pl3 = pc3.querySelector('.yc3-plats');
+    if (pl3) pl3.style.cssText = 'max-height:168px;overflow-y:auto;';
 
     var uc = mkEl('div', 'yc3-card');
+    uc.style.cssText = 'flex:1;min-width:0;';
     var ucH = mkEl('div', 'yc3-card-h');
     ucH.appendChild(mkEl('b', '', L('未读待办')));
     ucH.appendChild(mkEl('span', 'yc3-card-s yc3-un-sub', ''));
     uc.appendChild(ucH);
     uc.appendChild(mkEl('div', 'yc3-unread'));
-    right.appendChild(uc);
+    toprow.appendChild(uc);
+    toprow.appendChild(pc3);
 
-    var nc = mkEl('div', 'yc3-card yc3-node-card');
-    var ncH = mkEl('div', 'yc3-card-h');
-    ncH.appendChild(mkEl('b', '', L('翻译节点')));
-    nc.appendChild(ncH);
-    var nbig = mkEl('div', 'yc3-node-big');
-    nbig.appendChild(mkEl('b', 'yc3-node-ms', '—'));
-    nbig.appendChild(mkEl('span', 'yc3-node-unit', 'ms'));
-    var ngrade = mkEl('span', 'yc3-node-grade');
-    ngrade.appendChild(mkEl('i', 'yc3-node-dot'));
-    ngrade.appendChild(mkEl('span', 'yc3-node-st', '—'));
-    nbig.appendChild(ngrade);
-    nc.appendChild(nbig);
-    nc.appendChild(mkEl('div', 'yc3-node-sub', ''));
-    right.appendChild(nc);
+    // 翻译节点卡已删（2026-11-20 用户采纳建议）：信息与顶栏状态＋头部统计重复，改为异常才在顶部出提醒条（paintAlert）
+
+    // 功能 Key 一览（2026-11-20 用户点选加）：各功能实际会用哪把 Key，一眼核对防选错
+    var kc = mkEl('div', 'yc3-card yc3-keys-card');
+    var kcH = mkEl('div', 'yc3-card-h');
+    kcH.appendChild(mkEl('b', '', L('功能 Key 一览')));
+    kcH.appendChild(mkEl('span', 'yc3-card-s', L('各功能实际用的 Key')));
+    kc.appendChild(kcH);
+    kc.appendChild(mkEl('div', 'yc3-keys'));
+    right.appendChild(kc);
+
+    // 语音 / 看图用量（2026-11-20 用户点选加）：本机按天统计，paint 填充
+    var uc2 = mkEl('div', 'yc3-card yc3-usage-card');
+    var uc2H = mkEl('div', 'yc3-card-h');
+    uc2H.appendChild(mkEl('b', '', L('语音 / 看图用量')));
+    uc2H.appendChild(mkEl('span', 'yc3-card-s', L('本机统计')));
+    uc2.appendChild(uc2H);
+    uc2.appendChild(mkEl('div', 'yc3-usage'));
+    right.appendChild(uc2);
 
     cols.appendChild(right);
+    wb.appendChild(toprow);
     wb.appendChild(cols);
 
     // 页脚
     var foot = mkEl('div', 'yc2-foot');
-    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.5.0'));
+    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.6.2'));
     wb.appendChild(foot);
 
     // 事件委托：卡片被反复重建也不会丢点击
@@ -1496,6 +1776,98 @@
     return wb;
   }
 
+  // 主页两张新卡的填充：Key 一览（调各功能的选 Key 逻辑现算）+ 用量（读本机统计）；签名变了才重画
+  function paintKeysUsage(wb) {
+    try {
+      var kc = wb.querySelector('.yc3-keys');
+      if (kc) {
+        var rows = [
+          ['语音识别', asrEntry()],
+          ['看图', visionEntry()],
+          ['AI 帮写', aiEntry()],
+          ['语音合成', ttsEntry()],
+        ];
+        var sig = rows.map(function (r) { return r[1] ? (r[1].name || '') + '|' + (r[1].model || r[1].ttsModel || r[1].asrModel || '') : 'none'; }).join(';');
+        if (kc.getAttribute('data-sig') !== sig) {
+          kc.setAttribute('data-sig', sig);
+          kc.innerHTML = '';
+          rows.forEach(function (r) {
+            var row = mkEl('div', 'yc3-kv');
+            row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;font-size:13px;';
+            var lb1 = mkEl('span', 'yc3-kv-l', L(r[0])); lb1.style.color = 'var(--wb-t2)'; row.appendChild(lb1);
+            var v = mkEl('span', 'yc3-kv-v');
+            if (r[1]) {
+              v.textContent = (r[1].name || '未命名') + ' · ' + (r[1].model || r[1].ttsModel || r[1].asrModel || '');
+              v.style.cssText = 'color:var(--wb-t1);font-weight:600;text-align:right;word-break:break-all;';
+            } else {
+              v.textContent = L('未配置');
+              v.style.cssText = 'color:#d4380d;font-weight:600;';
+            }
+            row.appendChild(v);
+            kc.appendChild(row);
+          });
+        }
+      }
+      var uc = wb.querySelector('.yc3-usage');
+      if (uc) {
+        var t1 = usageSum(1), t7 = usageSum(7);
+        var usig = [t1.v, t1.i, t1.t, t7.v, t7.i, t7.t].join(',');
+        if (uc.getAttribute('data-sig') !== usig) {
+          uc.setAttribute('data-sig', usig);
+          uc.innerHTML = '';
+          [['今日', t1], ['近7天', t7]].forEach(function (pr) {
+            var row = mkEl('div', 'yc3-kv');
+            row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;font-size:13px;';
+            var lb2 = mkEl('span', 'yc3-kv-l', L(pr[0])); lb2.style.color = 'var(--wb-t2)'; row.appendChild(lb2);
+            var v = mkEl('span', 'yc3-kv-v', '语音 ' + pr[1].v + ' · 看图 ' + pr[1].i + ' · 合成 ' + pr[1].t);
+            v.style.cssText = 'color:var(--wb-t1);font-weight:600;';
+            row.appendChild(v);
+            uc.appendChild(row);
+          });
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 异常提醒（替你盯）：节点偏慢 / 今日失败≥3 / 核心 Key 缺失 / 平台掉线，四类异常才出声
+  function paintAlert(wb) {
+    var al = wb.querySelector('#ycAlert');
+    if (!al) return;
+    var st = lastStats;
+    var items = [];
+    if (st && st.avgMs > 1200) items.push('🌐 ' + L('翻译节点偏慢') + '（' + Math.round(st.avgMs) + ' ms），' + L('翻译会明显变卡，去翻译设置看下节点'));
+    if (st && (st.fail || 0) >= 3) items.push('⚠️ ' + L('今日翻译失败') + ' ' + st.fail + ' ' + L('条，去翻译设置检查节点或 Key'));
+    try { if (!visionEntry()) items.push('🔑 ' + L('核心 Key 未配置：翻译、看图、AI 帮写都用不了，去 设置 → API Key 里添加')); } catch (e) {}
+    var seen = paintAlert._seen || (paintAlert._seen = {});
+    var rows = wb.querySelectorAll('.yc3-prow');
+    for (var i = 0; i < rows.length; i++) {
+      var k = rows[i].getAttribute('data-k');
+      var on = !!rows[i].querySelector('.yc3-sdot.on');
+      var nmEl = rows[i].querySelector('.yc3-pname');
+      if (on) seen[k] = nmEl ? nmEl.textContent : k;
+      else if (seen[k]) items.push('🔌 ' + seen[k] + ' ' + L('已断开，点左侧它的图标重新打开'));
+    }
+    var sig = items.join('|');
+    if (al.getAttribute('data-sig') !== sig) {
+      al.setAttribute('data-sig', sig);
+      al.innerHTML = '';
+      for (var j = 0; j < items.length; j++) al.appendChild(mkEl('div', 'yc3-alert-line', items[j]));
+      if (items.length) {
+        var dx = mkEl('span', 'yc3-alert-x', '✕');
+        dx.style.cssText = 'float:right;cursor:pointer;opacity:.65;';
+        dx.setAttribute('data-yc', '1');
+        dx.addEventListener('click', function () { al.setAttribute('data-dismissed', al.getAttribute('data-sig') || ''); al.style.display = 'none'; });
+        al.appendChild(dx);
+      }
+    }
+    var dismissed = al.getAttribute('data-dismissed') || '';
+    al.style.display = (items.length && dismissed !== sig) ? 'block' : 'none';
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    al.style.background = dark ? '#2a1f08' : '#fff7e6';
+    al.style.borderColor = dark ? '#6b4e12' : '#ffd591';
+    al.style.color = dark ? '#f0c97a' : '#7a4a00';
+  }
+
   function paintWorkbench(force) {
     var en = curLang() === 'en';
     var wb = document.getElementById('yc-wb');
@@ -1517,6 +1889,10 @@
 
     // 数据：本机翻译统计 + 未读
     refreshStats(false);
+    paintKeysUsage(wb);
+    paintAlert(wb);
+    var thb2 = wb.querySelector('#ycThemeBtn');
+    if (thb2) { var thIc = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; if (thb2.textContent !== thIc) thb2.textContent = thIc; }
     var st = lastStats;
     var data = collectUnread();
     var hist = st && Array.isArray(st.history) ? st.history : [];
@@ -1659,6 +2035,18 @@
     if (unBox && unBox.getAttribute('data-sig') !== usig) {
       unBox.setAttribute('data-sig', usig);
       unBox.innerHTML = '';
+      // 空状态瘦身：没未读时未读卡收成一条瘦条（藏标题行、减内边距），有未读自动展开
+      var ucCard = unBox.closest ? unBox.closest('.yc3-card') : null;
+      if (ucCard) {
+        var ucHead = ucCard.querySelector('.yc3-card-h');
+        if (!data.total) {
+          ucCard.style.padding = '12px 16px';
+          if (ucHead) ucHead.style.display = 'none';
+        } else {
+          ucCard.style.padding = '';
+          if (ucHead) ucHead.style.display = '';
+        }
+      }
       if (!data.total) {
         var em = mkEl('div', 'yc-un-empty');
         em.innerHTML = ICO_EMPTY_OK;
@@ -2001,7 +2389,10 @@
     try { ensurePhraseActions(); } catch (e) {}   // 话术库：插入 / 发送
     try { syncUnread(); } catch (e) {}            // 未读角标 + 新消息通知
     try { paintRailBadges(); } catch (e) {}       // 左栏平台图标：在线绿点 + 未读角标
-    try { bindVoiceAll(); } catch (e) {}          // 语音气泡：转文字
+    try { paintAccBadges(); } catch (e) {}        // 会话页账号卡：名字后未读角标
+    try { bindVoiceAll(); } catch (e) {}
+    try { bindImgAll(); } catch (e) {}
+    try { bindTtsAll(); } catch (e) {}            // 图片消息：看图          // 语音气泡：转文字
     try { ensureToolDock(); } catch (e) {}        // 右栏底部 5 个速用键（逐栏）
     try { /* 右栏「翻译」角标已删除（2026-11-01） */ } catch (e) {}
     try { ensureTopIcons(); } catch (e) {}        // 右上角两键收成图标
@@ -2687,6 +3078,32 @@
     dashTick();
   }, 1000);
   dashTick();
+
+  // —— 设置页退出入口（2026-11-20 用户要）：第一版做成右上角悬浮钮，用户嫌像贴上去的；
+  // 改版：不用悬浮钮，在设置左侧菜单末尾加一项同款样式的「← 返回主页」，点击＝点左侧栏首页。
+  function ensureSettingsClose() {
+    try {
+      var old = document.getElementById('ycSetClose');
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      var list = document.querySelector('.settings-menu-list');
+      var back = document.getElementById('ycSetBack');
+      if (!list) { if (back && back.parentNode) back.parentNode.removeChild(back); return; }
+      if (back && back.parentNode === list) return;
+      if (back && back.parentNode) back.parentNode.removeChild(back);
+      back = document.createElement('div');
+      back.id = 'ycSetBack';
+      back.className = 'settings-menu-item';
+      back.style.marginTop = '10px';
+      back.innerHTML = '<span class="settings-menu-icon" style="font-size:15px;line-height:1">←</span><span>返回主页</span>';
+      back.addEventListener('click', function () {
+        var home = document.querySelector('.rail-item[data-t="rail-home"]');
+        if (home) home.click();
+      });
+      list.appendChild(back);
+    } catch (e) {}
+  }
+  setInterval(ensureSettingsClose, 1000);
+  ensureSettingsClose();
 // —— Ctrl+K 命令面板（2026-11-02）：平台 / 快捷入口 / 未读会话 / 话术（面板在 DOM 时）——
   var palState = { items: [], active: 0 };
   function palCollect(q) {
