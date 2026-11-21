@@ -1,6 +1,6 @@
 # YiChat 译聊
 
-![version](https://img.shields.io/badge/version-3.5.0-blue)
+![version](https://img.shields.io/badge/version-3.6.2-blue)
 ![electron](https://img.shields.io/badge/Electron-44-47848f)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)
 
@@ -9,6 +9,32 @@
 把 18 个海外社交平台的会话聚合到一个工作台里，收发消息自动翻译。做跨境生意、海外客服、跨国沟通，不用再开十几个网页来回切换，也不用复制消息去翻译软件里翻完再粘回来——在 YiChat 里，看到的即是译文，发出的即是外文。
 
 ---
+
+## 下载与安装
+
+到 [Releases](https://github.com/shuhoying-dot/YiChat/releases) 页下载对应平台的安装包。
+
+### Windows
+
+1. 下载全量包 zip，解压到任意文件夹；
+2. 双击里面的 YiChat.exe（或同名主程序）即可运行，无需安装；
+3. 以后升级小版本时，只需下载 `app-v<版本>.asar` 小包，改名为 `app.asar`，覆盖安装目录 `resources/` 里的同名文件，再重新打开应用。
+
+### macOS（Apple Silicon）
+
+安装包只支持 Apple 芯片机型（M1 / M2 / M3 / M4），Intel 芯片的 Mac 请勿下载。
+
+1. 下载 Mac 版 zip，双击解压，得到 `YiChat.app`；
+2. 把 `YiChat.app` 拖进「应用程序」文件夹；
+3. **第一次打开不要双击**：右键点击 `YiChat.app` → 选「打开」→ 在弹窗里再点「打开」。（本应用未做苹果开发者签名，直接双击会被系统拦截；右键打开一次之后，以后就能正常双击打开了。）
+4. 如果提示「已损坏，无法打开」：打开「终端」App，粘贴运行下面这一行，然后再打开应用：
+
+   ```
+   xattr -cr /Applications/YiChat.app
+   ```
+
+   也可以到「系统设置 → 隐私与安全性」，在页面下方点「仍要打开」。
+5. 升级小版本（asar 小包）：下载 `app-v<版本>.asar`，改名为 `app.asar`；在「应用程序」里右键 `YiChat.app` →「显示包内容」→ `Contents` → `Resources`，把里面的 `app.asar` 替换掉，再重新打开应用。账号和 Key 存在系统数据目录里，换包不会丢。
 
 ## 功能详解
 
@@ -140,6 +166,7 @@ YiChat/
 
 ## 版本沿革
 
+- **3.6.2**：语音转文字＋中文翻译、图片看图、语音发送（小米 MiMo 适配）、译文分隔线格式定版、工作台异常提醒、应用内自动更新关闭；macOS 版同步更新至 3.6.2。
 - **3.5.0**：18 平台聚合与双向翻译、三级翻译配置、发送保护、工作台首页（指标 / 图表 / 目标环 / 节点卡）、命令面板、四主题色与深色模式、会话页速用工具与话术库、AI 帮写、设置页卡片化统一、macOS（Apple 芯片）版同步发布。
 
 ## 第三方组件
