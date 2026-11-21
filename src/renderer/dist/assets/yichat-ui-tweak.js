@@ -191,6 +191,14 @@
     } catch (e) {}
   });
 
+  // 主题切换后立刻重绘工作台（3.6.8，审计 UI-6）：异常条颜色原先只在 paint 节奏里
+  // 按 data-theme 重算，切到深色后最长 900ms+ 仍是浅色奶油底；问候区深色另有 CSS 兜底
+  window.addEventListener('yichat-theme', function () { try { paintWorkbench(true); } catch (e) {} });
+  try {
+    new MutationObserver(function () { try { paintWorkbench(true); } catch (e) {} })
+      .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  } catch (e) {}
+
   // —— 右栏「翻译」角标的数据源：15 秒节流拉一次本机计数（只存在内存，不落盘、不外传）
   var lastStats = null;
   var lastStatsAt = 0;
@@ -805,23 +813,86 @@
     document.body.appendChild(mask);
   }
 
-  // —— 5) 语音转文字：页内点「转文字」→ 这里转给主进程识别（Key 用 API Key 里第一个可用的）
-  function asrEntry() {
+  // —— Key 条目单一解析（2026-11-21 3.6.8 收敛，审计 S1）——
+  // 原先三套口径并存：编译包翻译管线认 yichat-default-key 映射 + recv/send.keyId；
+  // tweak 四个功能各自按模型名正则现挑；主页卡片/核心提醒只反映 tweak 的挑法。
+  // 任一侧改规则（条目改名、调序），显示与实际行为就分叉，且全程静默——
+  // 2026-11-21「Key 录了、通道改了、就是不翻译」正是这么来的。
+  // 现收敛为一个解析函数 resolveEntry(feature)，feature ∈ translate/vision/asr/tts/ai：
+  //   1) 显式指定优先：yichat-default-key 里该功能的条目 id（与编译包管线同一张表；
+  //      翻译的 'translate' 由 设置→翻译设置 写入），指定还在就用它；
+  //   2) 没有指定才按模型名匹配（下方各 match*，保留各功能原规则）。
+  // 四个功能入口、主页「功能 Key 一览」、异常提醒全部走这个解析，同源不再分叉。
+  function apiKeyList() {
     try {
       var arr = JSON.parse((localStorage.getItem('yichat-api-keys') || localStorage.getItem('yichat_api_keys')) || '[]');
-      if (!Array.isArray(arr)) return null;
-      var fallback = null;
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function defaultKeyId(feature) {
+    try { return JSON.parse(localStorage.getItem('yichat-default-key') || '{}')[feature] || ''; } catch (e) { return ''; }
+  }
+  function resolveEntry(feature) {
+    var arr = apiKeyList();
+    var id = defaultKeyId(feature);
+    if (id) {
       for (var i = 0; i < arr.length; i++) {
-        var e = arr[i] || {};
-        if (!e.key) continue;
-        if (e.type === 'Claude' || e.type === 'Gemini' || e.type === 'DeepL') continue;
-        if (e.asrModel || /asr|whisper|transcribe/i.test(String(e.model || ''))) return e;
-        if (!fallback) fallback = e;
+        var e0 = arr[i] || {};
+        if (e0.id === id && e0.key) return e0;
       }
-      return fallback;
-    } catch (err) {}
+    }
+    var m = KEY_MATCHERS[feature] || KEY_MATCHERS.ai;
+    return m(arr);
+  }
+  function matchAsr(arr) {
+    var fallback = null;
+    for (var i = 0; i < arr.length; i++) {
+      var e = arr[i] || {};
+      if (!e.key) continue;
+      if (e.type === 'Claude' || e.type === 'Gemini' || e.type === 'DeepL') continue;
+      if (e.asrModel || /asr|whisper|transcribe/i.test(String(e.model || ''))) return e;
+      if (!fallback) fallback = e;
+    }
+    return fallback;
+  }
+  function matchVision(arr) {
+    var fallback = null;
+    var voiceFallback = null;
+    for (var i = 0; i < arr.length; i++) {
+      var e = arr[i] || {};
+      if (!e.key) continue;
+      if (e.type === 'Claude' || e.type === 'Gemini' || e.type === 'DeepL' || e.type === 'DeepSeek') continue;
+      // 3.6.8 修序（审计 S2）：先排除语音类模型再按类型选，与 aiEntry 同口径。
+      // 原实现先 `if type==='OpenAI' return`，语音条目（同为 OpenAI 类型）只要排第一，
+      // 看图就会把图片发给语音模型——当前能用纯属三条 Key 的创建顺序凑巧。
+      if (/asr|whisper|transcribe|tts/i.test(String(e.model || ''))) { if (!voiceFallback) voiceFallback = e; continue; }
+      if (e.type === 'OpenAI') return e;
+      if (!fallback) fallback = e;
+    }
+    return fallback || voiceFallback;
+  }
+  function matchTts(arr) {
+    for (var i = 0; i < arr.length; i++) {
+      var e = arr[i] || {};
+      if (!e.key) continue;
+      if (/tts/i.test(String(e.model || '')) || /tts/i.test(String(e.ttsModel || ''))) return e;
+    }
     return null;
   }
+  function matchAi(arr) {
+    for (var i = 0; i < arr.length; i++) {
+      var e = arr[i] || {};
+      if (!e.key) continue;
+      // 语音类模型（ASR/TTS）干不了写文字的活，跳过——否则会报 ASR requires input_audio
+      if (/asr|whisper|transcribe|tts/i.test(String(e.model || ''))) continue;
+      return e;
+    }
+    return null;
+  }
+  var KEY_MATCHERS = { translate: matchAi, vision: matchVision, asr: matchAsr, tts: matchTts, ai: matchAi };
+
+  // —— 5) 语音转文字：页内点「转文字」→ 这里转给主进程识别（条目走单一解析 resolveEntry）
+  function asrEntry() { return resolveEntry('asr'); }
 
   // llmAsr 实际挂在 window.scrm 上（preload 的 scrm 命名空间），不在 window.yichat 上：
   // v14 那次「错调 scrm」的结论把这里带反了，bindVoice 用 yapi() 永远拿不到 llmAsr，
@@ -900,24 +971,7 @@
 
   // —— 5b) 图片看懂：页内点「看图」→ 这里转给主进程视觉模型（走 llmChat 的多模态消息）
   var IMG_PROMPT = '你是帮我看懂图片的助手，请用简体中文回复。规则：1）图片里有文字时，先逐行抄出原文，再给出中文翻译；2）没有文字时，用一两句话说清图片内容（人物/物品/场景/关键信息）；3）如果是截图、单据或聊天记录，重点说明关键信息（金额、时间、名称、联系方式等）。不要寒暄，直接给结果。';
-  function visionEntry() {
-    try {
-      var arr = JSON.parse((localStorage.getItem('yichat-api-keys') || localStorage.getItem('yichat_api_keys')) || '[]');
-      if (!Array.isArray(arr)) return null;
-      var fallback = null;
-      var asrFallback = null;
-      for (var i = 0; i < arr.length; i++) {
-        var e = arr[i] || {};
-        if (!e.key) continue;
-        if (e.type === 'Claude' || e.type === 'Gemini' || e.type === 'DeepL' || e.type === 'DeepSeek') continue;
-        if (e.type === 'OpenAI') return e;
-        if (/asr|whisper|transcribe|tts/i.test(String(e.model || ''))) { if (!asrFallback) asrFallback = e; continue; }
-        if (!fallback) fallback = e;
-      }
-      return fallback || asrFallback;
-    } catch (err) {}
-    return null;
-  }
+  function visionEntry() { return resolveEntry('vision'); }
 
   function bindImg(el) {
     if (!el || el.__ycImgBound) return;
@@ -965,18 +1019,100 @@
     var list = document.querySelectorAll('webview');
     for (var i = 0; i < list.length; i++) bindImg(list[i]);
   }
+
+  // —— 5c) 弹窗登录接力：页内 window.open 被拦下后，经这里交给主进程开真窗口（继承账号 session）
+  function bindPopup(el) {
+    if (!el || el.__ycPopupBound) return;
+    el.__ycPopupBound = true;
+    el.addEventListener('ipc-message', function (e) {
+      try {
+        if (!e || e.channel !== 'yichat:popup-req') return;
+        var d = e.args && e.args[0];
+        if (!d || !d.url) return;
+        var api = null;
+        try { if (window.yichat && typeof window.yichat.openPopup === 'function') api = window.yichat; } catch (err) {}
+        if (!api) return;
+        var part = '';
+        try { part = el.getAttribute('partition') || ''; } catch (err) {}
+        api.openPopup(part, String(d.url));
+      } catch (x) {}
+    });
+  }
+
+  function bindPopupAll() {
+    var list = document.querySelectorAll('webview');
+    for (var i = 0; i < list.length; i++) bindPopup(list[i]);
+  }
   // —— 5c) 语音发送：页内面板打字 →（可选）翻成英文 → TTS 合成 → 回页内塞进聊天附件
-  function ttsEntry() {
-    try {
-      var arr = JSON.parse((localStorage.getItem('yichat-api-keys') || localStorage.getItem('yichat_api_keys')) || '[]');
-      if (!Array.isArray(arr)) return null;
-      for (var i = 0; i < arr.length; i++) {
-        var e = arr[i] || {};
-        if (!e.key) continue;
-        if (/tts/i.test(String(e.model || '')) || /tts/i.test(String(e.ttsModel || ''))) return e;
-      }
-    } catch (err) {}
+  function ttsEntry() { return resolveEntry('tts'); }
+
+  // —— 保存 Key 后自动自检（2026-11-21 3.6.8，审计 S1 收尾）——
+  // 设置页保存条目（pq）与写默认指定（gq）都会派发 yichat-apikeys。原先保存完没人验：
+  // Key 对不对、翻译默认指定没指定，全靠用户实际使用撞墙才发现，还都是静默失败。
+  // 这里在保存事件后自动：①对新增/变更的条目逐个测连接，结果用 toast 明说；
+  // ②有条目、通道走大模型API、却没指定翻译默认 Key → 明确提示去指定（同一状态只提一次）。
+  // 首次事件只记基线不打扰（启动时组件可能补发事件）。
+  function testKeyApi() {
+    try { if (window.scrm && typeof window.scrm.llmTestKey === 'function') return window.scrm; } catch (e) {}
+    try { if (window.yichat && typeof window.yichat.llmTestKey === 'function') return window.yichat; } catch (e) {}
     return null;
+  }
+  var keyCheckState = null; // { entrySig: {id: sig}, baseline: bool, hintSig: string }
+  try { keyCheckState = JSON.parse(localStorage.getItem('yc-keycheck-v1') || 'null'); } catch (e) {}
+  if (!keyCheckState || typeof keyCheckState !== 'object') keyCheckState = { entrySig: {}, baseline: false, hintSig: '' };
+  var keyCheckLoadTs = Date.now(); // 基线只认启动 10 秒内的补发事件，之后的都是真实保存
+  function saveKeyCheckState() { try { localStorage.setItem('yc-keycheck-v1', JSON.stringify(keyCheckState)); } catch (e) {} }
+  function entryCheckSig(e) {
+    return [e.id || '', String(e.key || '').slice(-4), e.baseUrl || '', e.model || '', e.type || ''].join(':');
+  }
+  var keyCheckTimer = null;
+  window.addEventListener('yichat-apikeys', function () {
+    if (keyCheckTimer) clearTimeout(keyCheckTimer);
+    keyCheckTimer = setTimeout(runKeySelfCheck, 700);
+  });
+  function runKeySelfCheck() {
+    try {
+      var arr = apiKeyList();
+      var isBaseline = !keyCheckState.baseline && (Date.now() - keyCheckLoadTs < 10000);
+      keyCheckState.baseline = true;
+      // 清掉已删除条目的旧签名
+      var alive = {};
+      arr.forEach(function (e) { if (e && e.id) alive[e.id] = 1; });
+      Object.keys(keyCheckState.entrySig).forEach(function (id) { if (!alive[id]) delete keyCheckState.entrySig[id]; });
+      var changed = arr.filter(function (e) { return e && e.id && keyCheckState.entrySig[e.id] !== entryCheckSig(e); });
+      arr.forEach(function (e) { if (e && e.id) keyCheckState.entrySig[e.id] = entryCheckSig(e); });
+      saveKeyCheckState();
+      if (isBaseline) return;
+      var api = testKeyApi();
+      if (api && changed.length) {
+        changed.slice(0, 4).forEach(function (e) {
+          Promise.resolve(api.llmTestKey(e)).then(function (r) {
+            if (r && r.ok) toast('✅ Key「' + (e.name || '未命名') + '」连接成功');
+            else toast('❌ Key「' + (e.name || '未命名') + '」测试失败：' + ((r && r.message) || '未知原因'), true);
+          }).catch(function () {
+            toast('❌ Key「' + (e.name || '未命名') + '」测试失败：请求没发出去', true);
+          });
+        });
+      }
+      // 翻译默认 Key 未指定的明确提示（与 paintAlert 同条件；这里在保存当口再提一次，同状态不重复）
+      try {
+        if (arr.length && !defaultKeyId('translate')) {
+          var tc1 = {};
+          try { tc1 = JSON.parse(localStorage.getItem('yichat_trans_config') || '{}'); } catch (e2) {}
+          var chS1 = (tc1.send && tc1.send.channel) || '谷歌';
+          var chR1 = (tc1.recv && tc1.recv.channel) || '谷歌';
+          if (chS1 === '大模型API' || chR1 === '大模型API') {
+            var hSig = arr.map(function (e) { return e.id; }).join(',');
+            if (keyCheckState.hintSig !== hSig) {
+              keyCheckState.hintSig = hSig;
+              saveKeyCheckState();
+              toast('🔑 还差一步：到 设置 → 翻译设置 里选用一把翻译默认 Key，大模型翻译才会工作', true);
+            }
+          }
+        }
+      } catch (e) {}
+      try { paintWorkbench(true); } catch (e) {}
+    } catch (e) {}
   }
   function bindTts(el) {
     if (!el || el.__ycTtsBound) return;
@@ -1382,20 +1518,7 @@
   ];
   var AI_TONES = ['礼貌', '简洁', '促单', '正式'];
   var aiState = { lang: '英语', tone: '礼貌', text: '' };
-  function aiEntry() {
-    try {
-      var arr = JSON.parse((localStorage.getItem('yichat-api-keys') || localStorage.getItem('yichat_api_keys')) || '[]');
-      if (!Array.isArray(arr)) return null;
-      for (var i = 0; i < arr.length; i++) {
-        var e = arr[i] || {};
-        if (!e.key) continue;
-        // 语音类模型（ASR/TTS）干不了写文字的活，跳过——否则会报 ASR requires input_audio
-        if (/asr|whisper|transcribe|tts/i.test(String(e.model || ''))) continue;
-        return e;
-      }
-    } catch (err) {}
-    return null;
-  }
+  function aiEntry() { return resolveEntry('ai'); }
   function llmApi() {
     try { if (window.scrm && typeof window.scrm.llmChat === 'function') return window.scrm; } catch (e) {}
     try { if (window.yichat && typeof window.yichat.llmChat === 'function') return window.yichat; } catch (e) {}
@@ -1625,10 +1748,15 @@
     gr.appendChild(gact);
     wb.appendChild(gr);
     // 异常提醒条：平时藏着，出事（节点偏慢/失败多/Key 缺失/平台掉线）才出现，可关、异常集合变了再出
+    // 3.6.8 改浮层（审计 UI-5）：wrapper 高度恒为 0、条本身绝对定位浮在内容上方，
+    // 出现/消失不再推挤顶排（原实现整页跳 124px）；关闭状态由 paintAlert 按异常签名存 localStorage
+    var alWrap = mkEl('div', 'yc3-alert-wrap');
+    alWrap.style.cssText = 'position:relative;height:0;z-index:60;flex:none;';
     var alBar = mkEl('div', 'yc3-alert');
     alBar.id = 'ycAlert';
-    alBar.style.cssText = 'display:none;border:1px solid;border-radius:12px;padding:10px 16px;margin-bottom:var(--wb-gap);font-size:13px;line-height:1.9;';
-    wb.appendChild(alBar);
+    alBar.style.cssText = 'display:none;position:absolute;left:0;right:0;top:0;border:1px solid;border-radius:12px;padding:10px 16px;font-size:13px;line-height:1.9;box-shadow:0 10px 28px rgba(16,24,40,.16);';
+    alWrap.appendChild(alBar);
+    wb.appendChild(alWrap);
 
     // ③ 两栏
     var cols = mkEl('div', 'yc3-cols');
@@ -1691,7 +1819,7 @@
 
     // 顶带（第 2 步）：待处理置顶——未读（宽）＋平台状态（定宽 302 与右栏齐）
     var toprow = mkEl('div', 'yc3-toprow');
-    toprow.style.cssText = 'display:flex;gap:var(--wb-gap);margin-bottom:var(--wb-gap);align-items:flex-start;';
+    toprow.style.cssText = 'display:flex;gap:var(--wb-gap);margin-bottom:var(--wb-gap);align-items:stretch;';
 
     // 右栏
     var right = mkEl('div', 'yc3-right');
@@ -1704,9 +1832,10 @@
     pc3.appendChild(pcH);
     pc3.appendChild(mkEl('div', 'yc3-plats'));
     var pl3 = pc3.querySelector('.yc3-plats');
-    if (pl3) pl3.style.cssText = 'max-height:168px;overflow-y:auto;';
+    // 3.6.8：限高/滚动样式收进编译 CSS 的工作台定版段（160px = 4 个整行），不再内联写死
+    if (pl3) pl3.style.cssText = '';
 
-    var uc = mkEl('div', 'yc3-card');
+    var uc = mkEl('div', 'yc3-card yc3-unread-card');
     uc.style.cssText = 'flex:1;min-width:0;';
     var ucH = mkEl('div', 'yc3-card-h');
     ucH.appendChild(mkEl('b', '', L('未读待办')));
@@ -1742,7 +1871,7 @@
 
     // 页脚
     var foot = mkEl('div', 'yc2-foot');
-    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.6.2'));
+    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.6.9'));
     wb.appendChild(foot);
 
     // 事件委托：卡片被反复重建也不会丢点击
@@ -1838,6 +1967,19 @@
     if (st && st.avgMs > 1200) items.push('🌐 ' + L('翻译节点偏慢') + '（' + Math.round(st.avgMs) + ' ms），' + L('翻译会明显变卡，去翻译设置看下节点'));
     if (st && (st.fail || 0) >= 3) items.push('⚠️ ' + L('今日翻译失败') + ' ' + st.fail + ' ' + L('条，去翻译设置检查节点或 Key'));
     try { if (!visionEntry()) items.push('🔑 ' + L('核心 Key 未配置：翻译、看图、AI 帮写都用不了，去 设置 → API Key 里添加')); } catch (e) {}
+    // 翻译默认 Key 未指定（3.6.8 补声，审计 S1）：条目都在、通道也走大模型API，
+    // 唯独没在翻译设置里选默认 Key 时，编译包管线取不到条目会静默不翻——明确报出来
+    try {
+      if (apiKeyList().length && !defaultKeyId('translate')) {
+        var tc0 = {};
+        try { tc0 = JSON.parse(localStorage.getItem('yichat_trans_config') || '{}'); } catch (e3) {}
+        var chS = (tc0.send && tc0.send.channel) || '谷歌';
+        var chR = (tc0.recv && tc0.recv.channel) || '谷歌';
+        if (chS === '大模型API' || chR === '大模型API') {
+          items.push('🔑 ' + L('翻译默认 Key 未指定：到 设置 → 翻译设置 里选用一把 Key，否则大模型翻译不会工作'));
+        }
+      }
+    } catch (e) {}
     var seen = paintAlert._seen || (paintAlert._seen = {});
     var rows = wb.querySelectorAll('.yc3-prow');
     for (var i = 0; i < rows.length; i++) {
@@ -1856,11 +1998,16 @@
         var dx = mkEl('span', 'yc3-alert-x', '✕');
         dx.style.cssText = 'float:right;cursor:pointer;opacity:.65;';
         dx.setAttribute('data-yc', '1');
-        dx.addEventListener('click', function () { al.setAttribute('data-dismissed', al.getAttribute('data-sig') || ''); al.style.display = 'none'; });
+        // 3.6.8：关闭按异常签名存 localStorage（原来只写 DOM 属性，工作台一重建就复活）
+        dx.addEventListener('click', function () {
+          try { localStorage.setItem('yc-alert-dismissed', al.getAttribute('data-sig') || ''); } catch (e) {}
+          al.style.display = 'none';
+        });
         al.appendChild(dx);
       }
     }
-    var dismissed = al.getAttribute('data-dismissed') || '';
+    var dismissed = '';
+    try { dismissed = localStorage.getItem('yc-alert-dismissed') || ''; } catch (e) {}
     al.style.display = (items.length && dismissed !== sig) ? 'block' : 'none';
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
     al.style.background = dark ? '#2a1f08' : '#fff7e6';
@@ -1918,8 +2065,9 @@
     if (gvOk) rollNum(gvOk, 'ok', okN);
     var gvRate = wb.querySelector('.yc3-gs-rate .yc3-gstat-v');
     if (gvRate) { if (totN > 0) rollNum(gvRate, 'rate', rateN, '%'); else { rollCache.rate = null; if (gvRate.textContent !== '—') gvRate.textContent = '—'; } }
-    // v3312：成功率档位色——≥99 绿（健康）/ 95–99 品牌色（默认）/ <95 红（出问题一眼可见）
-    if (gvRate) { var rc = totN > 0 ? (rateN >= 99 ? '#12b76a' : (rateN >= 95 ? '' : '#f04438')) : ''; if (gvRate.style.color !== rc) gvRate.style.color = rc; }
+    // 成功率分档色（3.6.8 按 UI 规矩，审计 UI-10）：红色只用于出错——
+    // ≥90 主文字色（默认）/ 75–90 橙（注意）/ <75 红（出错）。原档位 91% 就标红，与规矩冲突
+    if (gvRate) { var rc = totN > 0 ? (rateN >= 90 ? '' : (rateN >= 75 ? '#fa8c16' : '#f04438')) : ''; if (gvRate.style.color !== rc) gvRate.style.color = rc; }
     var gvUn = wb.querySelector('.yc3-gs-un .yc3-gstat-v');
     if (gvUn) rollNum(gvUn, 'un', data.total);
     var gsUn = wb.querySelector('.yc3-gs-un');
@@ -2035,18 +2183,8 @@
     if (unBox && unBox.getAttribute('data-sig') !== usig) {
       unBox.setAttribute('data-sig', usig);
       unBox.innerHTML = '';
-      // 空状态瘦身：没未读时未读卡收成一条瘦条（藏标题行、减内边距），有未读自动展开
-      var ucCard = unBox.closest ? unBox.closest('.yc3-card') : null;
-      if (ucCard) {
-        var ucHead = ucCard.querySelector('.yc3-card-h');
-        if (!data.total) {
-          ucCard.style.padding = '12px 16px';
-          if (ucHead) ucHead.style.display = 'none';
-        } else {
-          ucCard.style.padding = '';
-          if (ucHead) ucHead.style.display = '';
-        }
-      }
+      // 3.6.8（审计 UI-3）：空状态不再藏标题行、不再改内边距——标题与邻卡同线、
+      // padding 与所有卡统一，空状态内容由 CSS 在卡内垂直居中（.yc-un-empty margin:auto）
       if (!data.total) {
         var em = mkEl('div', 'yc-un-empty');
         em.innerHTML = ICO_EMPTY_OK;
@@ -2086,9 +2224,6 @@
         unBox.appendChild(tail);
       }
     }
-
-    // v339：未读为空时卡片瘦身（少占一截高度）
-    if (unBox) { var ucCard2 = unBox.closest ? unBox.closest('.yc3-card') : null; if (ucCard2) ucCard2.classList.toggle('yc3-unslim', data.total === 0); }
 
     // v333：新未读提醒——总数变多时未读卡轻闪一次（不弹窗不出声）
     if (lastUnTotal !== null && data.total > lastUnTotal && unBox) {
@@ -2392,6 +2527,7 @@
     try { paintAccBadges(); } catch (e) {}        // 会话页账号卡：名字后未读角标
     try { bindVoiceAll(); } catch (e) {}
     try { bindImgAll(); } catch (e) {}
+    try { bindPopupAll(); } catch (e) {}
     try { bindTtsAll(); } catch (e) {}            // 图片消息：看图          // 语音气泡：转文字
     try { ensureToolDock(); } catch (e) {}        // 右栏底部 5 个速用键（逐栏）
     try { /* 右栏「翻译」角标已删除（2026-11-01） */ } catch (e) {}

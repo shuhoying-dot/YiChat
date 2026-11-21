@@ -2,7 +2,7 @@
 const { app, BrowserWindow, ipcMain, session, Menu, webContents } = require('electron');
 // 禁用 WebAuthn（通行密钥）：Meta 系平台（Instagram/Facebook）登录时会触发
 // Windows 安全中心的安全密钥弹窗，关掉后各平台改走密码/验证码登录，不再弹系统窗。
-try { app.commandLine.appendSwitch('disable-features', 'WebAuthentication'); } catch (e) {}
+try { app.commandLine.appendSwitch('disable-features', 'WebAuth,WebAuthentication'); } catch (e) {}
 // Windows 桌面通知必须挂 AppUserModelID，否则系统托盘里认不出应用、toast 不弹（2026-11-01 未读汇总用）
 try { if (process.platform === 'win32') app.setAppUserModelId(process.execPath); } catch (e) {}
 
@@ -108,27 +108,54 @@ ipcMain.handle('yichat:get-device-id', () => getDeviceId());
 // 用户 2026-10-16 要求：退出确认倒数完真正退出应用（不只是退回登录页）
 ipcMain.handle('yichat:quit-app', () => { app.quit(); });
 
+// 弹窗登录接力（2026-11-21）：访客页的 window.open 被 overlay 拦下后走这里，
+// 开一个继承该账号 session 分区的真窗口完成 OAuth 登录；登录态落回账号分区。
+ipcMain.handle('yichat:open-popup', (event, partition, url) => {
+  try {
+    const u = String(url || '');
+    if (!/^https?:\/\//i.test(u)) return { ok: false };
+    const opts = {
+      width: 520,
+      height: 640,
+      autoHideMenuBar: true,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    };
+    if (partition) opts.webPreferences.session = session.fromPartition(String(partition));
+    const w = new BrowserWindow(opts);
+    w.loadURL(u);
+    return { ok: true };
+  } catch (e) { return { ok: false }; }
+});
+
 // ---- 诊断日志：翻译 overlay 探针（2026-10-31） ----
 // webview 里的 overlay 预加载脚本周期性上报扫描状态（平台识别/气泡数/翻译成败/DOM 链），
 // 写入 userData/overlay-diag.log。用于远程定位"某平台不翻译"问题，无需开发者工具。
-let diagLogBusy = false;
+// 3.6.8：改排队写——原实现 busy 时直接丢弃整条上报，多 webview 高频期恰好丢掉故障窗口
+const diagQueue = [];
+let diagWriting = false;
+function drainDiagQueue() {
+  if (diagWriting) return;
+  const line = diagQueue.shift();
+  if (!line) return;
+  diagWriting = true;
+  const fs = require('fs');
+  const file = path.join(app.getPath('userData'), 'overlay-diag.log');
+  // 超过 1MB 清空重写，避免无限增长
+  try {
+    const st = fs.statSync(file);
+    if (st && st.size > 1024 * 1024) fs.writeFileSync(file, '', 'utf8');
+  } catch (e) { /* 文件不存在，直接追加 */ }
+  fs.appendFile(file, line, () => { diagWriting = false; drainDiagQueue(); });
+}
 ipcMain.on('yichat:overlay-diag', (event, d) => {
   try {
     if (!d || typeof d !== 'object') return;
-    if (diagLogBusy) return;
-    diagLogBusy = true;
-    const fs = require('fs');
-    const file = path.join(app.getPath('userData'), 'overlay-diag.log');
     let url = '';
     try { url = event.sender.getURL ? event.sender.getURL() : ''; } catch (e) {}
-    const line = JSON.stringify({ t: new Date().toISOString(), url: String(url).slice(0, 120), ...d }) + '\n';
-    // 超过 1MB 清空重写，避免无限增长
-    try {
-      const st = fs.statSync(file);
-      if (st && st.size > 1024 * 1024) fs.writeFileSync(file, '', 'utf8');
-    } catch (e) { /* 文件不存在，直接追加 */ }
-    fs.appendFile(file, line, () => { diagLogBusy = false; });
-  } catch (e) { diagLogBusy = false; }
+    diagQueue.push(JSON.stringify({ t: new Date().toISOString(), url: String(url).slice(0, 120), ...d }) + '\n');
+    if (diagQueue.length > 500) diagQueue.splice(0, diagQueue.length - 500); // 极端积压时只丢最旧的
+    drainDiagQueue();
+  } catch (e) {}
 });
 // ---- 今日统计（2026-10-31）：主页「今日概览」用 ----
 // overlay 每完成一次翻译上报一条（成功/失败 + 平台），主进程按天累加落盘
@@ -649,6 +676,30 @@ app.on('web-contents-created', (event, contents) => {
   try {
     if (contents.getType() === 'webview') contents.setBackgroundThrottling(false);
   } catch (e) {}
+  // ---- 弹窗登录（2026-11-21 定版）----
+  // Meta Business 等平台的登录钮走 window.open 弹窗（如「用 Facebook 继续」）。
+  // 实测结论：给访客页（webview）单独设 setWindowOpenHandler 根本不会触发，
+  // 点了没反应就是这个原因。正确做法：webview 元素带 allowpopups（渲染层已加）
+  // ＋在宿主窗口上放行——弹窗开成真正的子窗口，并自动继承访客页的 session
+  // （登录态落回对应账号）；登录完成后关掉弹窗、刷新账号页即是已登录状态。
+  try {
+    if (contents.getType() === 'window') {
+      contents.setWindowOpenHandler(({ url }) => {
+        if (url && /^https?:\/\//i.test(url)) {
+          return {
+            action: 'allow',
+            overrideBrowserWindowOptions: {
+              width: 520,
+              height: 640,
+              autoHideMenuBar: true,
+              webPreferences: { webviewTag: false }
+            }
+          };
+        }
+        return { action: 'deny' };
+      });
+    }
+  } catch (e) {}
   // ---- 平台页缩放（2026-10-31） ----
   // 只缩放平台 webview 内容：Ctrl+= / Ctrl+- 步进，Ctrl+0 复位 100%。
   // 主窗口（LOGO、侧栏）不参与缩放——Chromium 默认的 Ctrl+滚轮整页缩放被
@@ -879,13 +930,9 @@ async function translateGoogleViaProxy(text, targetLang, proxy) {
     const to = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 15000);
     const fetchOpts = { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' } };
     const px = cleanProxy(proxy) || cleanProxy(process.env.HTTPS_PROXY) || cleanProxy(process.env.HTTP_PROXY) || '';
-    if (px) {
-      try {
-        const { ProxyAgent } = require('undici');
-        fetchOpts.dispatcher = new ProxyAgent(px);
-      } catch (e) {}
-    }
-    const r = await fetch(url, fetchOpts).catch(() => null);
+    // 3.6.8：代理走 llm.fetchTimeout 的内置实现（原 require('undici') 在本机 Electron
+    // MODULE_NOT_FOUND，try/catch 吞掉后恒直连，代理从来没生效过）
+    const r = await llm.fetchTimeout(url, fetchOpts, 15000, px).catch(() => null);
     clearTimeout(to);
     if (!r || !r.ok) return { ok: false };
     const d = await r.json().catch(() => null);

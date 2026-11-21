@@ -12,6 +12,84 @@
   var ipc = null;
   try { ipc = require('electron').ipcRenderer; } catch (e) { ipc = null; }
 
+  // 注：WebAuthn（通行密钥）已在主进程用 disable-features=WebAuth 全局关闭，
+  // 页面侧不再做任何 API 篡改——篡改 PublicKeyCredential 会挂掉部分平台的页面脚本。
+
+  // —— 弹窗登录接力（2026-11-21 定版）——
+  // webview 访客页的 window.open 会被 Electron 默认吞掉（disablePopups 在访客创建时
+  // 就定死，事后给元素加 allowpopups 也来不及），Meta Business 的「用 Facebook 继续」
+  // 这类按钮因此点了没反应。这里在页面主世界把 window.open 与 target=_blank 链接
+  // 拦下来，把地址经宿主桥交给主进程，由主进程开一个继承本账号 session 的真窗口
+  // 完成登录；登录态落回账号分区，关窗刷新即已登录。
+  // 跨世界传址两条路并行（属性标记＋CustomEvent），任一通即可，1.5 秒内同址去重：
+  // 预加载刚跑时 documentElement 可能还不存在，观察者必须等 DOM 就绪再挂
+  // （首版直接 observe(documentElement) 在真机实测中静默失败，整条链断在这里）。
+  var __popupLast = { url: '', t: 0 };
+  function relayPopup(u) {
+    try {
+      if (!u || !/^https?:\/\//i.test(u)) return;
+      var now = Date.now();
+      if (__popupLast.url === u && now - __popupLast.t < 1500) return;
+      __popupLast = { url: u, t: now };
+      if (ipc) ipc.sendToHost('yichat:popup-req', { url: u });
+    } catch (e) {}
+  }
+  try {
+    var wf2 = require('electron').webFrame;
+    if (wf2 && wf2.executeJavaScript) {
+      var pr2 = wf2.executeJavaScript('(function(){try{' +
+        'var _o = window.open;' +
+        'window.open = function(u){' +
+        'try{' +
+        'if(u){var abs = new URL(String(u), location.href);' +
+        'if(/^https?:$/.test(abs.protocol)){' +
+        'document.documentElement.setAttribute("data-yichat-popup", abs.href + "|" + Date.now());' +
+        'window.dispatchEvent(new CustomEvent("yichat:popup", { detail: abs.href }));' +
+        'return null;}}' +
+        '}catch(e){}' +
+        'return _o ? _o.apply(window, arguments) : null;' +
+        '};' +
+        '}catch(e){}})();', true);
+      if (pr2 && pr2.catch) pr2.catch(function () {});
+    }
+  } catch (e) {}
+  try {
+    window.addEventListener('yichat:popup', function (e) {
+      relayPopup(e && e.detail ? String(e.detail) : '');
+    });
+  } catch (e) {}
+  function armPopupRelay() {
+    try {
+      // 主世界写下的标记属性 → 转成宿主桥消息
+      var po = new MutationObserver(function () {
+        try {
+          var v = document.documentElement.getAttribute('data-yichat-popup');
+          if (!v) return;
+          document.documentElement.removeAttribute('data-yichat-popup');
+          relayPopup(v.slice(0, v.lastIndexOf('|')));
+        } catch (e) {}
+      });
+      po.observe(document.documentElement, { attributes: true, attributeFilter: ['data-yichat-popup'] });
+    } catch (e) {}
+    try {
+      // target=_blank 链接：隔离世界直接拦点击（与主世界共享同一 DOM 事件流）
+      document.addEventListener('click', function (e) {
+        try {
+          var a = e.target && e.target.closest ? e.target.closest('a[target="_blank"]') : null;
+          if (!a) return;
+          var href = a.href || '';
+          if (!/^https?:\/\//i.test(href)) return;
+          e.preventDefault(); e.stopPropagation();
+          relayPopup(href);
+        } catch (err) {}
+      }, true);
+    } catch (e) {}
+  }
+  try {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', armPopupRelay);
+    else armPopupRelay();
+  } catch (e) {}
+
   var OVERLAY_CLASS = 'scrm-trans-overlay';
   var enabled = true;
   // 注入参考代码的译文样式（虚线分隔）：照抄，只换品牌字
@@ -82,16 +160,19 @@
     messenger: {
       containers: ['div[role="row"]'],
       needScope: true,
+      composers: ['div[contenteditable="true"][data-lexical-editor="true"]', 'div[role="textbox"][data-lexical-editor="true"]'],
       texts: ['div[dir="auto"]', 'span[dir="auto"]']
     },
     facebook: {
       containers: ['div[role="row"]'],
       needScope: true,
+      composers: ['div[contenteditable="true"][data-lexical-editor="true"]', 'div[role="textbox"][data-lexical-editor="true"]'],
       texts: ['div[dir="auto"]', 'span[dir="auto"]']
     },
     metabiz: {
       containers: ['div[role="row"]'],
       needScope: true,
+      composers: ['div[contenteditable="true"][data-lexical-editor="true"]', 'div[role="textbox"][data-lexical-editor="true"]'],
       texts: ['div[dir="auto"]', 'span[dir="auto"]']
     },
     line: {
@@ -161,9 +242,12 @@
   // ================= 诊断探针（2026-10-31） =================
   // 用途：定位"某平台不翻译"。周期性把扫描各环节真实状态发给主进程，
   // 主进程写入 userData/overlay-diag.log，无需开发者工具即可远程诊断。
-  var diagStats = { bubbles: 0, transReq: 0, transOk: 0, transFail: 0, lastSkips: [] };
+  var diagStats = { bubbles: 0, transReq: 0, transOk: 0, transFail: 0, lastSkips: [], skipCounts: {} };
   function noteSkip(reason) {
     try {
+      // 3.6.8：跳过原因带计数——原来只留最近 6 个不重复原因、无次数，
+      // 「偶发一次」和「全军覆没」在日志里长得一模一样
+      diagStats.skipCounts[reason] = (diagStats.skipCounts[reason] || 0) + 1;
       if (diagStats.lastSkips.indexOf(reason) < 0) {
         diagStats.lastSkips.push(reason);
         if (diagStats.lastSkips.length > 6) diagStats.lastSkips.shift();
@@ -195,7 +279,11 @@
     try { roleRows = document.querySelectorAll('div[role="row"]').length; } catch (e2) {}
     var composer = false, scope = false;
     try { composer = !!findComposerEl(); } catch (e3) {}
-    try { scope = !!conversationScope(); } catch (e4) {}
+    try { scope = !!resolveScope(); } catch (e4) {}
+    // 3.6.9：被认出的输入框的祖先链——真实页面 scope 定位失败时，
+    // 靠它看清输入框到底住在哪个子树、离线程气泡有多深
+    var composerChain = '';
+    try { var cel9 = findComposerEl(); if (cel9) composerChain = dumpAncestorChain(cel9); } catch (e9) {}
     // 输入框候选元素详情（诊断发送翻译为何失效）
     var composerInfo = '';
     try {
@@ -232,7 +320,10 @@
       roleRows: roleRows,
       composerFound: composer,
       composerInfo: composerInfo,
+      composerChain: composerChain,
       scopeFound: scope,
+      scopeStrategy: rScopeStrategy,
+      climbMax: scopeClimbMax,
       overlays: overlays,
       pending: pending,
       bubblesLastScan: diagStats.bubbles,
@@ -240,6 +331,17 @@
       transOk: diagStats.transOk,
       transFail: diagStats.transFail,
       lastSkips: diagStats.lastSkips.slice(),
+      skipCounts: diagStats.skipCounts,
+      // 3.6.8：配置快照——原来日志里没有，「没开自动翻译」「没配默认 Key」
+      // 「平台识别失败」三种故障长得一模一样（都是 transReq=0），无法远程区分
+      cfgSnap: {
+        enabled: !!enabled,
+        auto: !!transCfg.auto,
+        channel: transCfg.channel || '',
+        sendChannel: transCfg.sendChannel || '',
+        hasKey: !!transCfg.hasKey,
+        targetLang: transCfg.targetLang || ''
+      },
       sampleText: sample,
       sampleChain: chain
     };
@@ -449,6 +551,8 @@
   // 找到输入框 → 只处理输入框所在会话区（向上首个含 ≥3 个消息容器的祖先）内的气泡；
   // 找不到输入框（没打开会话）→ 只认带明确消息容器类名的气泡，结构猜测的一律不翻。
   var cachedScope = null, scopeAt = 0;
+  var scopeClimbMax = 0; // 最近一次一级攀爬中见过的最大容器数（诊断用）
+  var rScopeEl = null, rScopeAt = 0, rScopeStrategy = null; // resolveScope 级联缓存（3.6.9）
   function findComposerEl() {
     var marked = document.querySelector('[data-scrm-chat-input]');
     if (marked) return marked;
@@ -469,7 +573,7 @@
     for (var i = 0; i < cands.length; i++) {
       try {
         var r = cands[i].getBoundingClientRect();
-        if (r.height > 20 && r.width > 200 && r.top > window.innerHeight * 0.4) return cands[i];
+        if (r.height >= 14 && r.width > 200 && r.top > window.innerHeight * 0.4) return cands[i];
       } catch (e) {}
     }
     return null;
@@ -488,11 +592,13 @@
     if (!input) { cachedScope = null; return null; }
     var sels = knownContainerSels();
     var node = input, best = null;
+    scopeClimbMax = 0;
     for (var d = 0; d < 10 && node && node !== document.body; d++) {
       node = node.parentElement;
       if (!node) break;
       var cnt = 0;
       for (var i = 0; i < sels.length; i++) { try { cnt += node.querySelectorAll(sels[i]).length; } catch (e) {} }
+      if (cnt > scopeClimbMax) scopeClimbMax = cnt;
       if (cnt >= 3) { best = node; break; }
     }
     cachedScope = best;
@@ -504,37 +610,77 @@
     return false;
   }
 
+  // 候选文本节点数：当前平台 cfg.texts 在 node 子树内的命中数
+  function candidateTextCount(node) {
+    try {
+      var cfg = currentCfg();
+      if (!cfg || !cfg.texts || !cfg.texts.length || !node || !node.querySelectorAll) return 0;
+      return node.querySelectorAll(cfg.texts.join(',')).length;
+    } catch (e) { return 0; }
+  }
+
+  // 会话区解析级联（3.6.9）：needScope 门与通用 scope 门共用，结果带 3 秒缓存。
+  // 一级 containers：conversationScope()——输入框向上找含 ≥3 已知容器的祖先；
+  //   结构浅的页面工作正常，保持原样不动。
+  // 二级 candidate：真实 Meta 页面 DOM 深（共同祖先在 12 层以上）、线程消息未必是
+  //   已知容器，一级必空——改为从输入框向上一直爬到 body，取含 ≥3 个候选文本
+  //   节点的最小祖先（全程达不到 3 时降级取含 ≥1 的最小祖先）。
+  // 三级 height：原 applyOverlay 内的高度兜底（>40% 视口、≤8 层、取最高合格者），
+  //   3.6.9 起加条件：祖先必须含 ≥1 个候选文本节点，杜绝选到输入框所在的独立面板。
+  function resolveScope() {
+    var now = Date.now();
+    if (rScopeEl && rScopeEl.isConnected && now - rScopeAt < 3000) return rScopeEl;
+    if (!rScopeEl && rScopeAt && now - rScopeAt < 3000) return null;
+    rScopeAt = now; rScopeEl = null; rScopeStrategy = null;
+    var s1 = conversationScope();
+    if (s1) { rScopeEl = s1; rScopeStrategy = 'containers'; return s1; }
+    var input = findComposerEl();
+    if (!input) return null;
+    try {
+      var node = input, best3 = null, best1 = null;
+      while (node && node.parentElement) {
+        node = node.parentElement;
+        var cc = candidateTextCount(node);
+        if (cc >= 1 && !best1) best1 = node;
+        if (cc >= 3) { best3 = node; break; }
+        if (node === document.body) break;
+      }
+      if (best3 || best1) { rScopeEl = best3 || best1; rScopeStrategy = 'candidate'; return rScopeEl; }
+    } catch (e) {}
+    try {
+      var hn = input, hBest = null, climb = 0;
+      while (hn && hn !== document.body && climb < 8) {
+        hn = hn.parentElement; climb++;
+        if (!hn) break;
+        var hr = null;
+        try { hr = hn.getBoundingClientRect(); } catch (e2) {}
+        if (hr && hr.height > window.innerHeight * 0.4 && candidateTextCount(hn) >= 1) hBest = hn;
+      }
+      if (hBest) { rScopeEl = hBest; rScopeStrategy = 'height'; return hBest; }
+    } catch (e) {}
+    return null;
+  }
+
   function applyOverlay(bubble) {
-    if (!enabled) return;
+    if (!enabled) { noteSkip('disabled'); return; }
     // 平台严格模式（如 WhatsApp）：只处理会话区（scope）内、本身就是消息容器的气泡；
     // 会话列表行/落地页元素被塞译文盒会溢出重叠，一律不碰
     try {
       var sc = currentCfg();
       if (sc && sc.strict) {
-        if (sc.scope && !(bubble.closest && bubble.closest(sc.scope))) return;
+        if (sc.scope && !(bubble.closest && bubble.closest(sc.scope))) { noteSkip('strict-scope'); return; }
         var okC = false;
         var scs = sc.containers || [];
         for (var si = 0; si < scs.length; si++) { try { if (bubble.matches && bubble.matches(scs[si])) { okC = true; break; } } catch (e) {} }
-        if (!okC) return;
+        if (!okC) { noteSkip('strict-not-container'); return; }
       }
     } catch (e) {}
     // needScope 平台（Meta 系）：必须落在会话区内才翻——列表页预览文本结构与消息相同，无此门必误译；
-    // 会话区优先用 conversationScope()，定位不到时用输入框祖先链兜底（向上找高度占视口 40% 以上的窗格）
+    // 会话区由 resolveScope() 级联解析（containers → candidate → height，见其注释，3.6.9）
     try {
       var nc = currentCfg();
       if (nc && nc.needScope) {
-        var nsc = conversationScope();
-        if (!nsc) {
-          var cin = findComposerEl();
-          if (cin) {
-            var cn = cin, climb = 0;
-            while (cn && cn !== document.body && climb < 8) {
-              cn = cn.parentElement; climb++;
-              if (!cn) break;
-              try { var crr = cn.getBoundingClientRect(); if (crr.height > window.innerHeight * 0.4) nsc = cn; } catch (e) {}
-            }
-          }
-        }
+        var nsc = resolveScope();
         if (!nsc || !nsc.contains(bubble)) { noteSkip('scope-block'); return; }
       }
     } catch (e) {}
@@ -545,7 +691,7 @@
     try {
       var gc0 = currentCfg();
       if (!(gc0 && gc0.scopeFree) && !matchesKnownContainer(bubble)) {
-        var scp2 = conversationScope();
+        var scp2 = resolveScope();
         if (scp2) { if (!scp2.contains(bubble)) { noteSkip('gen-scope-block'); return; } }
         else { noteSkip('no-scope-unknown'); return; }
       }
@@ -583,16 +729,16 @@
       if (isBubbleAnc && p.querySelector && p.querySelector(':scope > [data-scrm="trans-overlay"]')) { dup = true; break; }
       p = p.parentElement;
     }
-    if (dup) return;
+    if (dup) { noteSkip('dup-ancestor'); return; }
     // 翻译中的气泡打标记，避免并发重复请求同一文本
-    if (safe(function () { return bubble.getAttribute('data-scrm-trans-pending'); }, null)) return;
+    if (safe(function () { return bubble.getAttribute('data-scrm-trans-pending'); }, null)) { noteSkip('in-pending'); return; }
     // 纯日期文本不翻译
-    if (/^(today|yesterday|今天|昨天)$/i.test(content.trim())) return;
+    if (/^(today|yesterday|今天|昨天)$/i.test(content.trim())) { noteSkip('date-text'); return; }
     // 月份+日期格式不翻译（如 "September 30"）
-    if (/^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}$/i.test(content.trim())) return;
+    if (/^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}$/i.test(content.trim())) { noteSkip('date-text'); return; }
     // Telegram 系统服务消息不翻译（如自动删除通知）
-    if (/set messages to auto-delete|disabled the auto-delete|enabled the auto-delete|将消息设置为.*自动删除|禁用自动删除/i.test(content)) return;
-    if (inFlight >= 6) return;
+    if (/set messages to auto-delete|disabled the auto-delete|enabled the auto-delete|将消息设置为.*自动删除|禁用自动删除/i.test(content)) { noteSkip('system-msg'); return; }
+    if (inFlight >= 6) { noteSkip('inflight-full'); return; }
     inFlight++;
     safe(function () { bubble.setAttribute('data-scrm-trans-pending', '1'); }, null);
     markKeyword(bubble, content);
@@ -910,6 +1056,7 @@
   var transCfg = {
     showBar: true, barText: '', inputPh: '',
     auto: true, targetLang: '',
+    channel: '', sendChannel: '', hasKey: false,
     keywords: []
   };
   var transBar = null;
@@ -1386,15 +1533,24 @@
         var w = im.naturalWidth || im.width || 0;
         var h = im.naturalHeight || im.height || 0;
         if (w < 120 || h < 90) continue;
+        // 表情/贴纸/动图不给「看图」：那是情绪表达，没有要识别的内容（2026-11-21 用户定）
+        if (/\.gif($|[?#])/i.test(src)) continue;
         try {
           if (im.closest('[data-scrm]')) continue;
-          if (im.closest('[class*="avatar" i], [class*="profile-pic" i]')) continue;
+          if (im.closest('[class*="avatar" i], [class*="profile-pic" i], [class*="sticker" i], [class*="emoji" i]')) continue;
         } catch (e) {}
+        // 只认聊天消息里的图片：必须落在翻译引擎同款的消息气泡容器内。
+        // 旧版找不到容器就回退到父元素，结果落地页/登录页的宣传大图也被挂上按钮
+        // （FB 登录页左下角那颗就是这么来的）——回退取消，没气泡就没按钮。
+        // 3.6.8：容器集与翻译引擎同源——原先只用通用 bubbleSelectors，不含 Meta 系的
+        // div[role="row"]，FB/Messenger/商务套件聊天里的图片永远找不到宿主、看图静默缺失。
         var host = null;
         try {
-          host = im.closest('.message-in, .message-out, .bubble, [data-testid="msg-container"], [class*="message"], [class*="bubble"]');
+          var hostSels = bubbleSelectors.slice();
+          var ccfg = currentCfg();
+          if (ccfg && ccfg.containers) hostSels = ccfg.containers.concat(hostSels);
+          host = im.closest(hostSels.join(','));
         } catch (e2) {}
-        if (!host) host = im.parentElement;
         if (!host) continue;
         out.push({ img: im, host: host });
       }
@@ -1727,7 +1883,7 @@
     btn.setAttribute('data-scrm', 'tool-ui');
     btn.textContent = '🎙';
     btn.title = '语音发送（合成）';
-    btn.style.cssText = 'position:fixed;right:14px;bottom:96px;z-index:2147483000;width:44px;height:44px;border-radius:50%;border:none;background:#2f6bff;color:#fff;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;align-items:center;justify-content:center;';
+    btn.style.cssText = 'position:fixed;right:14px;bottom:96px;z-index:2147483000;width:44px;height:44px;border-radius:50%;border:none;background:#005dff;color:#fff;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;align-items:center;justify-content:center;';
     var panel = document.createElement('div');
     panel.id = 'ycTtsPanel';
     panel.setAttribute('data-scrm', 'tool-ui');
@@ -1744,7 +1900,7 @@
       '<div id="ycTtsSpoken" style="display:none;font-size:12.5px;color:#2b3a55;background:rgba(0,0,0,.045);border-radius:8px;padding:6px 9px;margin-bottom:8px;"></div>' +
       '<audio id="ycTtsAudio" controls style="display:none;width:100%;height:34px;margin-bottom:8px;"></audio>' +
       '<div style="display:flex;gap:8px;">' +
-      '<button id="ycTtsGo" style="flex:1;background:#2f6bff;color:#fff;border:none;border-radius:9px;padding:8px 0;font-size:13.5px;cursor:pointer;">生成并填入聊天</button></div>' +
+      '<button id="ycTtsGo" style="flex:1;background:#005dff;color:#fff;border:none;border-radius:9px;padding:8px 0;font-size:13.5px;cursor:pointer;">生成并填入聊天</button></div>' +
       '<div id="ycTtsStatus" style="font-size:12px;color:#7a8a99;margin-top:7px;line-height:1.5;"></div>';
     document.body.appendChild(btn);
     document.body.appendChild(panel);
@@ -1866,6 +2022,10 @@
         enabled = !!cfg.auto;
       }
       if (typeof cfg.targetLang === 'string') transCfg.targetLang = cfg.targetLang;
+      // 3.6.8：通道/有无 Key 一并留存，仅供诊断探针上报（cfgSnap），不参与页内逻辑
+      if (typeof cfg.channel === 'string') transCfg.channel = cfg.channel;
+      if (typeof cfg.sendChannel === 'string') transCfg.sendChannel = cfg.sendChannel;
+      if (typeof cfg.hasKey === 'boolean') transCfg.hasKey = cfg.hasKey;
       if (Array.isArray(cfg.keywords)) transCfg.keywords = cfg.keywords.filter(function (x) { return typeof x === 'string' && x.trim(); }).map(function (x) { return x.trim(); });
       if (typeof cfg.platformKey === 'string') profilePlatformKey = cfg.platformKey;
       renderTransBar();

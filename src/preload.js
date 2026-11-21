@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('yichat', {
   logMessage: (msg) => { try { ipcRenderer.send('yichat:ui-log', String(msg || '')); } catch (e) {} },
   // 今日翻译统计（2026-10-31）：主页「今日概览」用，只读本机计数
   getDailyStats: () => ipcRenderer.invoke('yichat:daily-stats'),
+  // 弹窗登录接力（2026-11-21）：主进程开继承指定账号分区的登录窗
+  openPopup: (partition, url) => ipcRenderer.invoke('yichat:open-popup', String(partition || ''), String(url || '')),
   // 翻译节点测速（2026-10-31）：主页「翻译节点」卡片的「重测」
 });
 

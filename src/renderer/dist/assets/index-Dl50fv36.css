@@ -316,7 +316,7 @@ body {font-family:-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Hiragino
 .settings-plat-row:hover {background:#f5f5f5}
 .settings-plat-row.active {color:#262626;background:#f0f0f0}
 .settings-main {flex:1;min-width:0;padding:18px 24px;overflow-y:auto}
-.set-panel {max-width:900px}
+.set-panel {max-width:1200px}
 .set-panel-title {margin-bottom:6px;font-size:18px;font-weight:700}
 .set-panel-desc {color:#8c8c8c;margin-bottom:16px;font-size:13px}
 .set-section-bar {background:#e6f4ff;border-left:3px solid #005dff;border-radius:0 8px 8px 0;justify-content:space-between;align-items:center;margin:18px 0 4px;padding:10px 14px;font-size:14px;font-weight:600;display:flex}
@@ -1444,7 +1444,7 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 /* ===== 工作台 v20（2026-11-01）：按设计系统令牌重刷，只作用于 #yc-wb，不动会话页/工具列 ===== */
 /* 令牌：主色 #2F6BFF / 淡底 #EEF3FF / 描边 #EAECF0 / 面 #F2F4F7 / 文字 #101828-#475467-#667085-#98A2B3
    圆角 面板16 卡12 控件10 角标9 / 阴影 sm 0 1px 2px rgba(16, 24, 40, .05) / 动效 120ms */
-#yc-wb {--wb-brand:#2f6bff;--wb-brand-50:#eef3ff;--wb-brand-100:#dce7ff;--wb-brand-700:#1740ae;
+#yc-wb {--wb-brand-50:#eef3ff;--wb-brand-100:#dce7ff;--wb-brand-700:#1740ae;
   --wb-line:#eaecf0;--wb-sunken:#f2f4f7;--wb-1:#101828;--wb-2:#475467;--wb-3:#667085;--wb-4:#98a2b3;
   --wb-shadow:0 1px 2px rgba(16,24,40,.05);--wb-shadow-md:0 4px 8px -2px rgba(16,24,40,.08),0 2px 4px -2px rgba(16,24,40,.04)}
 /* 未读待办：最多露 4 行（其余内部滚动），把纵向空间优先留给平台矩阵 */
@@ -1741,12 +1741,12 @@ body.yc-side-narrow .sess-side>* {display:none!important}
    此前 .yc2-tiles 被 flex:1 + 1fr 行高拉满整屏，六张卡片内容悬在
    半空、大面积留白。本节放在文件末尾，同优先级下以本节为准：
    1) 工作台内容限宽居中，超宽屏不摊大饼；
-   2) 六宫格定高 148px，不再拉伸，卡片内边距统一；
+   2) 六宫格定高 96px，不再拉伸，卡片内边距统一；
    3) 底部统计带 margin-top:auto 贴底，留白集中在中部一处，不再
       被卡片吞掉；小节标题与顶条间距统一。
    ================================================================ */
-#yc-wb {max-width:1480px!important;margin-left:auto!important;margin-right:auto!important;width:100%!important}
-#yc-wb .yc2-tiles {flex:none!important;grid-template-rows:none!important;grid-auto-rows:148px!important;align-content:start!important}
+#yc-wb {max-width:1720px!important;margin-left:auto!important;margin-right:auto!important;width:100%!important}
+#yc-wb .yc2-tiles {flex:none!important;grid-template-rows:none!important;align-content:start!important}
 #yc-wb .yc2-tile {padding:16px 18px!important}
 #yc-wb .yc2-sect {margin-top:2px!important}
 /* ===== 2026-11-02 v32 工作台定版：设计变量收口 / 两栏布局 / 深色补齐 / 动效 / 命令面板 =====
@@ -1755,7 +1755,7 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 #yc-wb {
   --wb-brand: #005dff;
   --wb-radius: 12px;
-  --wb-gap: 12px;
+  --wb-gap: 16px;
   --wb-t1: #101828;
   --wb-t2: #475467;
   --wb-t3: #98a2b3;
@@ -1775,7 +1775,7 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 #yc-wb .yc2-tile { transition: background-color .25s ease, border-color .25s ease, transform .18s ease, box-shadow .18s ease; }
 /* 两栏骨架 */
 #yc-wb .yc3-cols { flex: 1; display: flex; gap: var(--wb-gap); min-height: 0; }
-#yc-wb .yc3-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--wb-gap); overflow-y: auto; min-height: 0; padding-right: 2px; }
+#yc-wb .yc3-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--wb-gap); overflow-y: auto; min-height: 0; padding-right: 0; }
 #yc-wb .yc3-right { width: 302px; flex: none; display: flex; flex-direction: column; gap: var(--wb-gap); overflow-y: auto; min-height: 0; }
 @media (max-width: 1080px) {
 #yc-wb .yc3-cols { flex-direction: column; overflow-y: auto; }
@@ -1797,21 +1797,21 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 /* 通用卡 */
 #yc-wb .yc3-card {
   background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: var(--wb-radius);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .04); padding: 13px 15px; flex: none;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04); padding: 16px; box-sizing: border-box; flex: none;
 }
-#yc-wb .yc3-card-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
+#yc-wb .yc3-card-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 #yc-wb .yc3-card-h b { font-size: 13.5px; font-weight: 600; color: var(--wb-t1); }
 #yc-wb .yc3-card-s { font-size: 11.5px; color: var(--wb-t3); }
 #yc-wb .yc3-chart-tot { margin-left: auto; font-size: 12px; color: var(--wb-t2); }
 #yc-wb .yc3-chart-tot b { color: var(--wb-t1); font-size: 13px; }
 /* 六宫格（v32 定高：左栏还要放图表卡） */
-#yc-wb .yc3-left .yc2-tiles { grid-auto-rows: 118px; flex: none; }
+#yc-wb .yc3-left .yc2-tiles { flex: none; }
 #yc-wb .yc2-tile:hover { transform: translateY(-3px); box-shadow: 0 10px 22px -10px rgba(16, 24, 40, .25); }
 [data-theme="dark"] #yc-wb .yc2-tile:hover { box-shadow: 0 10px 22px -10px rgba(0, 0, 0, .6); }
 /* 柱状图 */
-#yc-wb .yc3-chart { display: flex; align-items: flex-end; gap: 6px; height: 106px; padding-top: 4px; }
+#yc-wb .yc3-chart { display: flex; align-items: flex-end; gap: 8px; height: 106px; padding-top: 4px; }
 #yc-wb .yc3-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; min-width: 0; }
-#yc-wb .yc3-bar-v { font-size: 11px; color: var(--wb-t2); }
+#yc-wb .yc3-bar-v { font-size: 12px; color: var(--wb-t2); }
 #yc-wb .yc3-bar { width: 56%; max-width: 44px; border-radius: 5px 5px 2px 2px; background: color-mix(in srgb, var(--wb-brand) 28%, transparent); transform-origin: bottom; }
 #yc-wb .yc3-bar.today { background: var(--wb-brand); }
 #yc-wb .yc3-bar-d { font-size: 11px; color: var(--wb-t3); }
@@ -1821,7 +1821,7 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 #yc-wb .yc3-tip { font-size: 12px; color: var(--wb-t2); display: inline-flex; align-items: center; gap: 6px; }
 #yc-wb .yc3-kbd { font-size: 11px; color: var(--wb-t2); background: rgba(127, 127, 127, .12); border: 1px solid var(--wb-line); border-radius: 5px; padding: 1px 6px; font-weight: 600; }
 /* 平台状态行 */
-#yc-wb .yc3-prow { display: flex; align-items: center; gap: 10px; padding: 6.5px 2px; cursor: pointer; border-radius: 8px; }
+#yc-wb .yc3-prow { display: flex; align-items: center; gap: 10px; padding: 8px 0; height: 40px; box-sizing: border-box; cursor: pointer; border-radius: 8px; }
 #yc-wb .yc3-prow:hover { background: rgba(127, 127, 127, .07); }
 #yc-wb .yc3-prow + .yc3-prow { border-top: 1px solid color-mix(in srgb, var(--wb-line) 55%, transparent); }
 #yc-wb .yc3-pico2 { width: 26px; height: 26px; border-radius: 8px; background: rgba(127, 127, 127, .1); display: flex; align-items: center; justify-content: center; flex: none; color: #fff; }
@@ -1931,7 +1931,7 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 #yc-wb .yc3-ai-btn { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; background: color-mix(in srgb, var(--wb-brand) 10%, transparent); color: var(--wb-brand); border: 1px solid color-mix(in srgb, var(--wb-brand) 28%, transparent); padding: 5px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 #yc-wb .yc3-ai-btn:hover { background: color-mix(in srgb, var(--wb-brand) 17%, transparent); }
 /* 六宫格：变矮 + 内容居中 + 悬停箭头 */
-#yc-wb .yc3-left .yc2-tiles { grid-auto-rows: 100px; }
+#yc-wb .yc3-left .yc2-tiles { }
 #yc-wb .yc2-tile { align-items: center; position: relative; }
 #yc-wb .yc2-tile::after { content: '→'; position: absolute; top: 9px; right: 12px; font-size: 13px; color: var(--wb-t3); opacity: 0; transition: opacity .18s ease; }
 #yc-wb .yc2-tile:hover::after { opacity: .55; }
@@ -2007,21 +2007,20 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 #yc-wb .yc3-chart { flex: 1; min-height: 106px; }
 #yc-wb .yc3-right .yc3-node-card { margin-top: auto; }
 @media (min-width: 1700px) {
-#yc-wb .yc3-left .yc2-tiles { grid-auto-rows: 112px; }
+#yc-wb .yc3-left .yc2-tiles {  }
 }
 #yc-wb .yc3-greet::after { right: 16px; top: 50%; transform: translateY(-50%); width: 118px; height: 118px; }
 #yc-wb .yc3-chart-empty { align-items: center; justify-content: center; flex-direction: column; gap: 7px; padding-bottom: 0; border-bottom: none; font-size: 13px; }
 #yc-wb .yc3-chart-empty::before { content: '📊'; font-size: 24px; opacity: .45; }
 /* ===== 2026-11-02 v331：头部带合并 + 间距统一 + 图表封顶/日均线/零值柱 + 快捷键入卡 + 整页单滚动 ===== */
-#yc-wb { --wb-gap: 16px; }
 #yc-wb .yc3-cols { overflow: visible; }
 #yc-wb .yc3-greet { display: flex; align-items: center; gap: 30px; padding: 18px 20px;
   background: radial-gradient(520px 230px at 90% 30%, color-mix(in srgb, var(--wb-part) 20%, transparent), transparent 70%),
               linear-gradient(120deg, color-mix(in srgb, var(--wb-part) 14%, transparent), color-mix(in srgb, var(--wb-part) 4%, transparent) 55%, color-mix(in srgb, #7c5cd6 10%, transparent)), var(--wb-panel); }
 #yc-wb .yc3-greet::before, #yc-wb .yc3-greet::after { display: none; }
 #yc-wb .yc3-greet-main { flex: none; }
-#yc-wb .yc3-greet-t { font-size: 24px; }
-#yc-wb .yc3-greet-sub { display: block; margin-top: 5px; font-size: 12.5px; color: var(--wb-t3); white-space: nowrap; }
+#yc-wb .yc3-greet-t { font-size: 20px; }
+#yc-wb .yc3-greet-sub { display: block; margin-top: 5px; font-size: 12px; color: var(--wb-t3); white-space: nowrap; }
 #yc-wb .yc3-gstats { display: flex; gap: 30px; }
 #yc-wb .yc3-gstat-v { display: block; font-size: 22px; font-weight: 800; line-height: 1.15; color: var(--wb-brand); font-variant-numeric: tabular-nums; }
 #yc-wb .yc3-gstat-l { font-size: 11px; color: var(--wb-t3); }
@@ -2029,9 +2028,9 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 #yc-wb .yc3-gactions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 #yc-wb .yc3-search { white-space: nowrap; }
 #yc-wb .yc3-ai-btn { background: linear-gradient(135deg, color-mix(in srgb, var(--wb-brand) 72%, #ffffff), var(--wb-brand) 55%, #7c5cd6); color: #fff; border-color: transparent; box-shadow: 0 4px 12px color-mix(in srgb, var(--wb-brand) 35%, transparent); font-weight: 700; }
-#yc-wb .yc2-tiles { gap: 16px; grid-auto-rows: 112px; }
+#yc-wb .yc2-tiles { gap: 16px;  }
 #yc-wb .yc3-left, #yc-wb .yc3-right { gap: 16px; }
-#yc-wb .yc3-card { padding: 16px 18px; }
+
 #yc-wb .yc3-left .yc3-chart-card { flex: none; }
 #yc-wb .yc3-chart { flex: none; height: 190px; position: relative; }
 #yc-wb .yc3-chart::after { content: ''; position: absolute; left: 0; right: 0; bottom: 17px; height: 1px; background: var(--wb-line); }
@@ -2042,7 +2041,7 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 #yc-wb .yc3-avg span { position: absolute; right: 0; top: -18px; font-size: 11px; color: var(--wb-brand); background: color-mix(in srgb, var(--wb-panel) 88%, transparent); padding: 0 3px; border-radius: 3px; }
 #yc-wb .yc3-chart-empty { top: 46px; bottom: auto; height: 196px; }
 #yc-wb .yc3-tips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--wb-line); margin: 12px -18px -16px; padding: 11px 18px 13px; font-size: 12px; color: var(--wb-t3); background: transparent; box-shadow: none; border-radius: 0; }
-#yc-wb .yc3-pdiv { height: 1px; background: var(--wb-line); margin: 5px 0; }
+#yc-wb .yc3-pdiv { height: 40px; margin: 0; display: flex; align-items: center; }
 @media (max-width: 1120px) {
 #yc-wb .yc3-gstats { display: none; }
 }
@@ -2094,8 +2093,8 @@ body.yc-side-narrow .sess-side>* {display:none!important}
   #yc-wb .yc3-chart-empty { height: auto; bottom: 12px; }
 }
 /* 未读为空：卡片收紧 */
-#yc-wb .yc3-card.yc3-unslim { padding-top: 10px; padding-bottom: 10px; }
-#yc-wb .yc3-card.yc3-unslim .yc3-card-h { margin-bottom: 3px; }
+
+
 /* 「编辑」归位：贴到「快捷入口」标题右侧，做成小描边钮 */
 #yc-wb .yc3-sect-edit { margin-left: 10px; border: 1px solid var(--wb-line); border-radius: 999px; padding: 2px 11px; color: var(--wb-t2); background: #fff; font-weight: 500; }
 #yc-wb .yc3-sect-edit:hover { color: var(--wb-brand); border-color: var(--wb-brand); }
@@ -2141,3 +2140,18 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 #yc-wb .yc3-gstat-v{font-size:24px!important}
 #yc-wb .yc3-node-ms{font-size:24px!important}
 #yc-wb .yc3-toprow .yc3-card{margin:0!important}
+
+/* ===== 2026-11-21 v368 工作台定版（3.6.8 单一事实源）：平台列表整行限高 / 未读空状态 / 深色问候区 / 选中态 =====
+   本节为工作台相关规则的最终定版：平台列表限高、分隔线、未读卡布局只在此处定义；
+   历史段中同名规则的旧值已逐条删除或改定版，不再多代叠加。 */
+/* 平台列表：160px = 4 个整行单位（行高 40px，分隔线同为一个 40px 单位），任何状态下不露半行 */
+#yc-wb .yc3-plats { max-height: 160px; overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; }
+#yc-wb .yc3-pdiv::before { content: ''; flex: 1; border-top: 1px solid var(--wb-line); }
+/* 未读卡：标题常显、内容区填满卡高，空状态垂直居中（与平台卡同为 stretch 等高） */
+#yc-wb .yc3-unread-card { display: flex; flex-direction: column; }
+#yc-wb .yc3-unread-card .yc3-unread { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#yc-wb .yc-un-empty { margin: auto !important; }
+/* 深色问候区：改用品牌蓝低透明度，不再混时段色（浅色下好看的橙/紫在黑底上发棕） */
+[data-theme="dark"] #yc-wb .yc3-greet { background: radial-gradient(520px 230px at 90% 30%, color-mix(in srgb, var(--wb-brand) 16%, transparent), transparent 70%), linear-gradient(120deg, color-mix(in srgb, var(--wb-brand) 10%, transparent), color-mix(in srgb, var(--wb-brand) 4%, transparent) 55%, transparent), var(--wb-panel); }
+/* 选中态单一口径：浅灰（与设置菜单一致），钉死防旧段回潮 */
+.settings-plat-row.active { background: #f0f0f0 !important; color: #262626 !important; box-shadow: none !important; }

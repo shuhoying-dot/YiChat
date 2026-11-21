@@ -61,25 +61,141 @@ function isDirectUrl(url) {
   } catch (e) { return false; }
 }
 
-function proxyDispatcher() {
-  const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy || 'http://127.0.0.1:7897';
-  if (!proxy) return null;
-  try {
-    const { ProxyAgent } = require('undici');
-    return new ProxyAgent(proxy);
-  } catch (e) { return null; }
+// ---- 代理（2026-11-21 3.6.8 重写）----
+// 原实现 require('undici') 在打包用的 Electron 里 MODULE_NOT_FOUND，proxyDispatcher
+// 恒返回 null → 主进程请求永远直连、代理配了也不生效；还留过硬编码回退代理
+// 127.0.0.1:7897（开发者本机端口假设，已删除）。现改为 Node 内置 http/https/net/tls
+// 手写 HTTP 代理：http 目标走绝对 URI 转发，https 目标走 CONNECT 隧道，无第三方依赖。
+// 代理来源：环境变量 HTTPS_PROXY/HTTP_PROXY，或调用方显式传入（谷歌翻译的账号代理）；
+// 没配就直连。只支持 http/https 代理（socks 代理走 webview session 那条路）。
+function envProxy() {
+  return String(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy || '').trim();
 }
 
-async function fetchTimeout(url, opts = {}, ms = 30000) {
+function fetchViaProxy(rawUrl, opts, proxyUrl, signal) {
+  return new Promise((resolve, reject) => {
+    let sock = null;
+    let req = null;
+    let done = false;
+    const fail = (e) => {
+      if (done) return;
+      done = true;
+      try { if (req) req.destroy(); } catch (_) {}
+      try { if (sock) sock.destroy(); } catch (_) {}
+      reject(e);
+    };
+    const onAbort = () => { const e = new Error('请求已取消'); e.name = 'AbortError'; fail(e); };
+    if (signal) {
+      if (signal.aborted) { onAbort(); return; }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    (async () => {
+      const http = require('http');
+      const https = require('https');
+      const net = require('net');
+      const tls = require('tls');
+      const target = new URL(rawUrl);
+      const proxy = new URL(proxyUrl);
+      const method = String(opts.method || 'GET').toUpperCase();
+      // 用 Request 统一序列化 body（string / FormData / Blob 都可），并合并请求头
+      const reqObj = new Request(rawUrl, {
+        method,
+        headers: opts.headers || {},
+        body: (method !== 'GET' && method !== 'HEAD' && opts.body != null) ? opts.body : undefined,
+      });
+      const headers = {};
+      reqObj.headers.forEach((v, k) => { headers[k] = v; });
+      let bodyBuf = null;
+      if (opts.body != null && method !== 'GET' && method !== 'HEAD') {
+        bodyBuf = Buffer.from(await reqObj.arrayBuffer());
+        headers['content-length'] = String(bodyBuf.length);
+      }
+      const isHttps = target.protocol === 'https:';
+      const proxyPort = Number(proxy.port) || (proxy.protocol === 'https:' ? 443 : 80);
+      const auth = proxy.username
+        ? 'Basic ' + Buffer.from(decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password || '')).toString('base64')
+        : '';
+      const finish = (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          if (done) return;
+          done = true;
+          const buf = Buffer.concat(chunks);
+          const h = {};
+          for (const k of Object.keys(res.headers)) {
+            if (k !== 'transfer-encoding' && k !== 'content-length') h[k] = res.headers[k];
+          }
+          resolve(new Response(buf.length ? buf : null, { status: res.statusCode, headers: h }));
+        });
+        res.on('error', fail);
+      };
+      if (!isHttps) {
+        // HTTP 目标：把绝对 URI 直接发给代理转发
+        const h2 = { ...headers, host: target.host };
+        if (auth) h2['proxy-authorization'] = auth;
+        req = http.request({ host: proxy.hostname, port: proxyPort, method, path: rawUrl, headers: h2 }, finish);
+        req.on('error', fail);
+        if (bodyBuf) req.write(bodyBuf);
+        req.end();
+        return;
+      }
+      // HTTPS 目标：先 CONNECT 建隧道，再在隧道上做 TLS
+      sock = net.connect(proxyPort, proxy.hostname);
+      sock.on('error', fail);
+      sock.on('connect', () => {
+        sock.write('CONNECT ' + target.host + ' HTTP/1.1\r\nHost: ' + target.host + '\r\n'
+          + (auth ? 'Proxy-Authorization: ' + auth + '\r\n' : '') + '\r\n');
+      });
+      let buf = Buffer.alloc(0);
+      let tunnelDone = false;
+      sock.on('data', (chunk) => {
+        if (tunnelDone) return;
+        buf = Buffer.concat([buf, chunk]);
+        const idx = buf.indexOf('\r\n\r\n');
+        if (idx < 0) return;
+        const statusLine = buf.slice(0, idx).toString('latin1').split('\r\n')[0];
+        if (parseInt(statusLine.split(' ')[1], 10) !== 200) { fail(new Error('代理 CONNECT 失败：' + statusLine)); return; }
+        tunnelDone = true;
+        const tlsSock = tls.connect({
+          socket: sock,
+          servername: target.hostname,
+          rejectUnauthorized: process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0',
+        });
+        tlsSock.on('error', fail);
+        tlsSock.on('secureConnect', () => {
+          req = https.request({
+            host: target.hostname,
+            port: Number(target.port) || 443,
+            method,
+            path: target.pathname + target.search,
+            headers: { ...headers, host: target.host },
+            agent: false,
+            createConnection: () => tlsSock,
+          }, finish);
+          req.on('error', fail);
+          if (bodyBuf) req.write(bodyBuf);
+          req.end();
+        });
+      });
+    })().catch(fail);
+  });
+}
+
+async function fetchTimeout(url, opts = {}, ms = 30000, proxyOverride) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort();
+    else opts.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+  }
   try {
-    const fetchOpts = { ...opts, signal: ctrl.signal };
-    // 国外接口走代理（环境变量），国内接口直连
-    if (!isDirectUrl(url)) {
-      const dispatcher = proxyDispatcher();
-      if (dispatcher) fetchOpts.dispatcher = dispatcher;
+    // 国外接口走代理（显式传入优先，否则环境变量），国内直连域名永远直连
+    const proxy = proxyOverride !== undefined ? String(proxyOverride || '').trim() : envProxy();
+    if (proxy && /^https?:\/\//i.test(proxy) && !isDirectUrl(url)) {
+      return await fetchViaProxy(url, opts, proxy, ctrl.signal);
     }
+    const fetchOpts = { ...opts, signal: ctrl.signal };
     return await fetch(url, fetchOpts);
   } finally {
     clearTimeout(timer);
@@ -440,4 +556,4 @@ async function transcribe(entry, audioBase64, mime, lang) {
   }
 }
 
-module.exports = { testKey, chat, translate, tts, transcribe, DEFAULT_BASE, DEFAULT_MODEL };
+module.exports = { testKey, chat, translate, tts, transcribe, fetchTimeout, DEFAULT_BASE, DEFAULT_MODEL };
