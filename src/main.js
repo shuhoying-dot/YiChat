@@ -1,5 +1,5 @@
 // 主进程：创建窗口、单实例锁、IPC 通道（适配器管理）、自动更新。
-const { app, BrowserWindow, ipcMain, session, Menu, webContents } = require('electron');
+const { app, BrowserWindow, ipcMain, session, Menu, webContents, safeStorage } = require('electron');
 // 禁用 WebAuthn（通行密钥）：Meta 系平台（Instagram/Facebook）登录时会触发
 // Windows 安全中心的安全密钥弹窗，关掉后各平台改走密码/验证码登录，不再弹系统窗。
 try { app.commandLine.appendSwitch('disable-features', 'WebAuth,WebAuthentication'); } catch (e) {}
@@ -105,6 +105,43 @@ function getDeviceId() {
   return deviceIdCached;
 }
 ipcMain.handle('yichat:get-device-id', () => getDeviceId());
+
+// ---- Key 加密主密钥（2026-11-21，3.6.11） ----
+// 随机 32B 主密钥落盘 userData/vault-key.bin：safeStorage 可用时（Win DPAPI / Mac
+// Keychain）以 safeStorage 包裹存储，拷走 userData 到别的机器/用户下解不开；
+// 不可用时（Linux 无 keyring 等）降级明文存放并回 backend='fallback-plain' 供宿主
+// 在界面上明示降级，绝不假装已加密。preload 用 sendSync 取，故用 ipcMain.on 同步回，
+// 且照既有口径过 assertTrusted 守卫。
+let __ycVaultCache = null;
+function __ycVaultMasterKey() {
+  if (__ycVaultCache) return __ycVaultCache;
+  const fs = require('fs');
+  const file = path.join(app.getPath('userData'), 'vault-key.bin');
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      if (fs.existsSync(file)) {
+        __ycVaultCache = { key: safeStorage.decryptString(fs.readFileSync(file)), backend: 'safeStorage' };
+      } else {
+        const k = require('crypto').randomBytes(32).toString('base64');
+        fs.writeFileSync(file, safeStorage.encryptString(k));
+        __ycVaultCache = { key: k, backend: 'safeStorage' };
+      }
+    } else if (fs.existsSync(file)) {
+      __ycVaultCache = { key: fs.readFileSync(file, 'utf8').trim(), backend: 'fallback-plain' };
+    } else {
+      const k = require('crypto').randomBytes(32).toString('base64');
+      fs.writeFileSync(file, k, 'utf8');
+      __ycVaultCache = { key: k, backend: 'fallback-plain' };
+    }
+  } catch (e) {
+    return { key: '', backend: 'error', message: String(e && e.message || e) };
+  }
+  return __ycVaultCache;
+}
+ipcMain.on('yichat:vault-key', (event) => {
+  try { assertTrusted(event, 'yichat:vault-key'); event.returnValue = __ycVaultMasterKey(); }
+  catch (e) { event.returnValue = { key: '', backend: 'denied', message: String(e && e.message || e) }; }
+});
 // 用户 2026-10-16 要求：退出确认倒数完真正退出应用（不只是退回登录页）
 ipcMain.handle('yichat:quit-app', () => { app.quit(); });
 

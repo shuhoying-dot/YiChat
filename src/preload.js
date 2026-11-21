@@ -2,6 +2,15 @@
 // 渲染层只能调用这里白名单列出的方法，拿不到 Node 能力。
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Key 加密 shim 的主密钥（2026-11-21，3.6.11）：preload 在页面脚本之前执行，用 sendSync
+// 同步向主进程取回主密钥并缓存；主世界的 shim 经 contextBridge 同步读取，保证 bundle
+// 首次读 localStorage 之前密钥已就位（Storage.getItem 是同步 API，异步 IPC 赶不上）。
+let __ycVaultKey = null;
+try { __ycVaultKey = ipcRenderer.sendSync('yichat:vault-key'); } catch (e) { __ycVaultKey = null; }
+contextBridge.exposeInMainWorld('yichatVault', {
+  getMasterKey: () => __ycVaultKey,
+});
+
 contextBridge.exposeInMainWorld('scrm', {
   // 平台：取已注册平台列表
   getPlatforms: () => ipcRenderer.invoke('scrm:list-platforms'),

@@ -1093,6 +1093,26 @@
     var list = document.querySelectorAll('webview');
     for (var i = 0; i < list.length; i++) bindHealth(list[i]);
   }
+  // —— 5e) Key 加密状态（2026-11-21 3.6.11）：key-vault shim 在主世界留下
+  // window.__ycVaultState，这里在 paintAlert 的节奏里读它并入异常条浮层。
+  // 三种异常各有签名与独立关闭记录（yc-vault-dismissed，沿用健康自检口径）；
+  // 状态恢复正常时清掉关闭记录，同因复发能重新出现。
+  var VAULT_DISMISS_KEY = 'yc-vault-dismissed';
+  function vaultDismissed() {
+    try { return JSON.parse(localStorage.getItem(VAULT_DISMISS_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function setVaultDismissed(m) {
+    try { localStorage.setItem(VAULT_DISMISS_KEY, JSON.stringify(m)); } catch (e) {}
+  }
+  function vaultAlert() {
+    var st = null;
+    try { st = window.__ycVaultState || null; } catch (e) {}
+    if (!st) return { sig: 'vault:off', text: '🔑 ' + L('Key 加密未启用') };
+    if (st.error === 'decrypt-failed') return { sig: 'vault:decrypt-failed', text: '⚠ ' + L('API Key 解密失败：本机密钥与数据不匹配（可能拷贝了其他电脑的数据），请重新录入 Key') };
+    if (st.ready && st.backend === 'fallback-plain') return { sig: 'vault:fallback-plain', text: '🔑 ' + L('系统密钥环不可用，Key 保护已降级') };
+    if (!st.ready) return { sig: 'vault:off', text: '🔑 ' + L('Key 加密未启用') };
+    return null;
+  }
   // —— 5c) 语音发送：页内面板打字 →（可选）翻成英文 → TTS 合成 → 回页内塞进聊天附件
   function ttsEntry() { return resolveEntry('tts'); }
 
@@ -1921,7 +1941,7 @@
 
     // 页脚
     var foot = mkEl('div', 'yc2-foot');
-    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.6.10'));
+    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.6.11'));
     wb.appendChild(foot);
 
     // 事件委托：卡片被反复重建也不会丢点击
@@ -2047,15 +2067,25 @@
       var h = healthMap[s];
       return '⚠ ' + platDisplayName(h.platform) + ' ' + L('翻译未生效：') + h.reason + L('（软件已自动记录日志）');
     });
+    // Key 加密行（3.6.11）：与健康行同管线——独立签名与关闭记录，恢复正常时清场
+    var va = null;
+    try { va = vaultAlert(); } catch (e) {}
+    var vdMap = vaultDismissed();
+    var vLines = [];
+    if (va) { if (!vdMap[va.sig]) vLines.push(va.text); }
+    else if (Object.keys(vdMap).length) setVaultDismissed({});
+    var vsig = va ? va.sig : '';
     var sig = items.join('|');
     var hsig = hSigs.join(',');
-    if (al.getAttribute('data-sig') !== sig || al.getAttribute('data-hsig') !== hsig) {
+    if (al.getAttribute('data-sig') !== sig || al.getAttribute('data-hsig') !== hsig || al.getAttribute('data-vsig') !== vsig) {
       al.setAttribute('data-sig', sig);
       al.setAttribute('data-hsig', hsig);
+      al.setAttribute('data-vsig', vsig);
       al.innerHTML = '';
       for (var j = 0; j < items.length; j++) al.appendChild(mkEl('div', 'yc3-alert-line', items[j]));
       for (var hj = 0; hj < hLines.length; hj++) al.appendChild(mkEl('div', 'yc3-alert-line', hLines[hj]));
-      if (items.length || hLines.length) {
+      for (var vj = 0; vj < vLines.length; vj++) al.appendChild(mkEl('div', 'yc3-alert-line', vLines[vj]));
+      if (items.length || hLines.length || vLines.length) {
         var dx = mkEl('span', 'yc3-alert-x', '✕');
         dx.style.cssText = 'float:right;cursor:pointer;opacity:.65;';
         dx.setAttribute('data-yc', '1');
@@ -2068,6 +2098,10 @@
             (al.getAttribute('data-hsig') || '').split(',').forEach(function (s) { if (s) dm2[s] = 1; });
             setHealthDismissed(dm2);
           } catch (e) {}
+          try {
+            var vs2 = al.getAttribute('data-vsig') || '';
+            if (vs2) { var vd2 = vaultDismissed(); vd2[vs2] = 1; setVaultDismissed(vd2); }
+          } catch (e) {}
           al.style.display = 'none';
         });
         al.appendChild(dx);
@@ -2075,7 +2109,7 @@
     }
     var dismissed = '';
     try { dismissed = localStorage.getItem('yc-alert-dismissed') || ''; } catch (e) {}
-    al.style.display = ((items.length && dismissed !== sig) || hLines.length) ? 'block' : 'none';
+    al.style.display = ((items.length && dismissed !== sig) || hLines.length || vLines.length) ? 'block' : 'none';
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
     al.style.background = dark ? '#2a1f08' : '#fff7e6';
     al.style.borderColor = dark ? '#6b4e12' : '#ffd591';
