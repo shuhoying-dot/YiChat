@@ -347,10 +347,206 @@
     };
   }
   function sendDiag() {
-    try { if (ipc && ipc.send) ipc.send('yichat:overlay-diag', collectDiag()); } catch (e) {}
+    var d = null;
+    try { d = collectDiag(); } catch (e) {}
+    // 3.6.10：健康自检与诊断共用同一份周期数据（评估在上报之前做，互不影响）
+    try { if (d) evalHealth(d); } catch (e) {}
+    try { if (ipc && ipc.send && d) ipc.send('yichat:overlay-diag', d); } catch (e) {}
   }
   setInterval(sendDiag, 8000);
   setTimeout(sendDiag, 2500);
+
+  // ================= 健康自检（3.6.10） =================
+  // 教训（3.6.7→3.6.9 三版连环修）：功能靠猜 DOM、坏了静默，用户先发现。
+  // 探针数据其实齐全，只是没浮出来。这里在 diag 周期内评估「翻译是否在真工作」：
+  // 有待译内容、翻译已开、却持续发不出请求（或请求全失败），连续 ≥3 个周期后
+  // 经宿主桥报给宿主，宿主在工作台异常条里说清「哪个平台、什么原因」。
+  // 判定从严：没开会话、刚打开页面（宽限期 15 秒）、样本已是目标语言，一律不报。
+  var healthState = { navAt: Date.now(), lastUrl: '', prev: null, streak: 0, bad: null, okResend: null, healthyStreak: 0, clearedOk: false };
+  var HEALTH_REASONS = ['找不到输入框', '找不到会话区', '翻译请求失败', '有消息未被翻译'];
+  // 抗污染版样本判断：译文盒绘在气泡内时，diag 样本的 textContent 会把译文连进来
+  // （如 'What are the fees?这是模拟译文'），整段判定会被目标语言占比冲掉。按 CJK
+  // 分段，只要有一段含 ≥4 个拉丁字母，就认为样本里还有外语原文（部分已译也算有内容）
+  function sampleHasForeign(sample) {
+    if (!sample) return false;
+    var segs = String(sample).split(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+/);
+    for (var i = 0; i < segs.length; i++) {
+      if ((segs[i].match(/[A-Za-z]/g) || []).length >= 4) return true;
+    }
+    return sampleIsForeign(sample);
+  }
+  function skipTotal(counts) {
+    var n = 0;
+    try { for (var k in counts) if (Object.prototype.hasOwnProperty.call(counts, k)) n += counts[k] || 0; } catch (e) {}
+    return n;
+  }
+  // 样本是否为「非目标语言」（待译）：只看文字构成比例，宁可漏报不可误报
+  function sampleIsForeign(txt) {
+    if (!txt) return false;
+    var s = String(txt);
+    var cjk = (s.match(/[\u3400-\u9fff]/g) || []).length;
+    var letters = (s.match(/[A-Za-z\u00c0-\u024f\u0400-\u04ff\u0590-\u05ff\u0600-\u06ff\u0900-\u097f\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
+    var targetIsZh = /中文|chinese/i.test(String(transCfg.targetLang || ''));
+    if (targetIsZh) return letters >= 4 && cjk <= Math.max(1, letters * 0.25);
+    if (cjk >= 2) return true;
+    var latin = (s.match(/[A-Za-z]/g) || []).length;
+    return letters >= 4 && latin <= letters * 0.3;
+  }
+  function sendHealth(payload) {
+    try { if (ipc && ipc.sendToHost) ipc.sendToHost('yichat:health', payload); } catch (e) {}
+  }
+  function pickHealthReason(d, cur) {
+    // 请求在发、却全失败（且从没成功过）→ 通道/Key 层面的失败，不是 DOM 问题
+    if (d.transReq > 0 && d.transOk === 0 && d.transFail >= 3) return '翻译请求失败';
+    // 输入框都找不到（3.6.7 的真实故障签名）→ 级联无从谈起，先报它
+    if (!d.composerFound) return '找不到输入框';
+    // 输入框在、会话区定位失败（3.6.8 的真实故障签名）
+    var sc = d.skipCounts || {};
+    if (d.scopeFound === false || (sc['scope-block'] || 0) > 0 || (sc['gen-scope-block'] || 0) > 0 || (sc['no-scope-unknown'] || 0) > 0) return '找不到会话区';
+    if (d.transFail > 0 && d.transOk === 0) return '翻译请求失败';
+    return '有消息未被翻译';
+  }
+  function evalHealth(d) {
+    var now = Date.now();
+    var url = String(d.url || '');
+    if (healthState.lastUrl && url && url !== healthState.lastUrl) {
+      // 页内导航（SPA 切会话/切页面）：宽限期与基线重计，避免拿旧页面数据误判
+      healthState.navAt = now;
+      healthState.prev = null;
+      healthState.streak = 0;
+    }
+    if (url) healthState.lastUrl = url;
+    // 恢复通知重发（60 秒内每周期一次）：ok 是边沿事件，宿主在视图切换/重绑
+    // webview 的空窗里可能错过单次发送——错过一次，签名就永远清不掉、同因再犯也不再出现
+    if (healthState.okResend) {
+      if (now - healthState.okResend.at < 60000) {
+        for (var oi = 0; oi < healthState.okResend.items.length; oi++) {
+          var oit = healthState.okResend.items[oi];
+          sendHealth({ platform: d.platformKey || '', reason: oit.reason, signature: oit.signature, state: 'ok' });
+        }
+      } else healthState.okResend = null;
+    }
+    var cur = {
+      req: d.transReq || 0, ok: d.transOk || 0, fail: d.transFail || 0,
+      skips: skipTotal(d.skipCounts)
+    };
+    var cfgOk = !!(d.cfgSnap && d.cfgSnap.enabled && d.cfgSnap.auto && d.cfgSnap.hasKey);
+    // 恢复信号一：翻译又成功了（transOk 增长）→ 撤下并通知宿主清签名
+    if (healthState.bad && healthState.prev && cur.ok > healthState.prev.ok) {
+      healthState.okResend = { items: [{ reason: healthState.bad.reason, signature: healthState.bad.signature }], at: now };
+      sendHealth({ platform: d.platformKey || '', reason: healthState.bad.reason, signature: healthState.bad.signature, state: 'ok' });
+      healthState.bad = null;
+      healthState.streak = 0;
+    }
+    // 恢复信号二：用户把自动翻译关了 / 配置变了 → 不是静默失效，同样撤下
+    if (healthState.bad && !cfgOk) {
+      healthState.okResend = { items: [{ reason: healthState.bad.reason, signature: healthState.bad.signature }], at: now };
+      sendHealth({ platform: d.platformKey || '', reason: healthState.bad.reason, signature: healthState.bad.signature, state: 'ok' });
+      healthState.bad = null;
+      healthState.streak = 0;
+    }
+    var prev = healthState.prev;
+    healthState.prev = cur;
+    if (!prev) return;                    // 首个周期只记基线
+    if (now - healthState.navAt < 15000) return;  // 宽限期：刚打开的页面不许报
+    // 陈旧警报清场（放在 hasContent 判定之前）：本实例已有成功翻译这一硬证据时，
+    // 宿主侧可能还挂着上一个实例（页面重载后旧实例的 bad 状态随之消失、永远发不出 ok）
+    // 留下的条目——主动为本平台全部已知原因发 ok 清掉。仍在故障中的实例 transOk 恒为 0
+    // （或同实例恢复走上面的一对一 ok），不会误清；万一清早了，随后的 bad 重报会再挂回来
+    if (!healthState.bad && !healthState.clearedOk && (cur.ok > 0 || healthState.healthyStreak >= 3)) {
+      healthState.clearedOk = true;
+      var cItems = [];
+      for (var ci = 0; ci < HEALTH_REASONS.length; ci++) {
+        cItems.push({ reason: HEALTH_REASONS[ci], signature: String(d.platformKey || 'unknown') + '+' + HEALTH_REASONS[ci] });
+      }
+      healthState.okResend = { items: cItems, at: now };
+      for (var cj = 0; cj < cItems.length; cj++) {
+        sendHealth({ platform: d.platformKey || '', reason: cItems[cj].reason, signature: cItems[cj].signature, state: 'ok' });
+      }
+    }
+    var hasContent = (d.bubblesLastScan || 0) > 0 && sampleHasForeign(d.sampleText);
+    if (!hasContent || !cfgOk) { if (!healthState.bad) healthState.streak = 0; return; }
+    var dReq = cur.req - prev.req, dOk = cur.ok - prev.ok, dFail = cur.fail - prev.fail, dSkips = cur.skips - prev.skips;
+    var cycleBad = false;
+    if (dOk === 0 && dReq === 0 && dSkips > 0) cycleBad = true;             // 有跳过、无请求：静默失效
+    else if (dOk === 0 && dReq === 0 && d.scopeFound === false) cycleBad = true; // 会话区恒为空
+    else if (dOk === 0 && dReq > 0 && dFail > 0) cycleBad = true;           // 请求在发、全失败
+    if (cycleBad) { healthState.streak++; healthState.healthyStreak = 0; }
+    else {
+      if (!healthState.bad) healthState.streak = 0;
+      if (dOk > 0 || (dReq === 0 && dSkips === 0)) healthState.healthyStreak++;
+    }
+    if (healthState.streak >= 3) {
+      var reason = pickHealthReason(d, cur);
+      var signature = String(d.platformKey || 'unknown') + '+' + reason;
+      // 同因复发：停掉上一轮恢复的 ok 重发，别让新旧状态在宿主侧打架
+      if (healthState.okResend) {
+        healthState.okResend.items = healthState.okResend.items.filter(function (it) { return it.signature !== signature; });
+        if (!healthState.okResend.items.length) healthState.okResend = null;
+      }
+      healthState.bad = { reason: reason, signature: signature };
+      // 每周期重发（幂等）：宿主迟绑/工作台重建时也能补上
+      sendHealth({ platform: d.platformKey || '', reason: reason, signature: signature, state: 'bad' });
+    }
+  }
+
+  // ================= 页面结构快照（3.6.10） =================
+  // 为「真页面回归基线」铺路：把当前页面结构脱敏导出——只留 tag / class / role /
+  // 几何尺寸 / 关键存在性标记（lexical、contenteditable、dir），严禁任何文本内容、
+  // 输入值、href/src 原值（URL 只留 host+path 骨架）。宿主经 executeJavaScript 调用。
+  function buildSnapshot() {
+    var MAX_DEPTH = 24, MAX_NODES = 4000;  // 深度按真页面实测留余量（商务套件输入框在 15 层深处，14 会把关键区截在门外）
+    var count = 0, truncated = false;
+    function walk(el, depth) {
+      if (!el) return null;
+      if (count >= MAX_NODES) { truncated = true; return null; }
+      count++;
+      var node = { t: String(el.tagName || '').toLowerCase() };
+      try {
+        var cls = el.getAttribute && el.getAttribute('class');
+        if (cls) {
+          var toks = String(cls).split(/\s+/).filter(Boolean).slice(0, 4).map(function (x) { return x.slice(0, 48); });
+          if (toks.length) node.c = toks.join(' ');
+        }
+        var role = el.getAttribute && el.getAttribute('role');
+        if (role) node.r = String(role).slice(0, 30);
+        var r = el.getBoundingClientRect();
+        var w = Math.round(r.width), h = Math.round(r.height);
+        if (w || h) node.g = w + 'x' + h;
+        var f = [];
+        if (el.hasAttribute && el.hasAttribute('data-lexical-editor')) f.push('lex');
+        var ce = el.getAttribute && el.getAttribute('contenteditable');
+        if (ce !== null && ce !== undefined && ce !== 'false') f.push('ce');
+        var dir = el.getAttribute && el.getAttribute('dir');
+        if (dir) f.push('dir=' + String(dir).slice(0, 8));
+        if (f.length) node.f = f;
+      } catch (e) {}
+      var kids = [];
+      var noDescend = node.t === 'script' || node.t === 'style' || node.t === 'link' || node.t === 'meta';
+      if (!noDescend && depth < MAX_DEPTH) {
+        var ch = el.children || [];
+        for (var i = 0; i < ch.length; i++) {
+          if (count >= MAX_NODES) { truncated = true; break; }
+          var kn = walk(ch[i], depth + 1);
+          if (kn) kids.push(kn);
+        }
+      } else if (!noDescend && el.children && el.children.length) truncated = true;
+      if (kids.length) node.k = kids;
+      return node;
+    }
+    var tree = null;
+    try { tree = walk(document.documentElement, 0); } catch (e) {}
+    var urlSkel = '';
+    try { urlSkel = location.protocol + '//' + location.host + location.pathname; } catch (e) {}
+    return {
+      kind: 'yichat-page-snapshot', v: 1,
+      platform: profilePlatformKey || '',
+      url: urlSkel,
+      capturedAt: new Date().toISOString(),
+      nodes: count, truncated: truncated,
+      tree: tree
+    };
+  }
 
   // ================= Ctrl+滚轮缩放平台页（2026-10-31） =================
   // 拦截访客页内的 Ctrl+滚轮（阻止 Chromium 默认缩放行为），转发给主进程，
@@ -738,19 +934,52 @@
     if (/^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}$/i.test(content.trim())) { noteSkip('date-text'); return; }
     // Telegram 系统服务消息不翻译（如自动删除通知）
     if (/set messages to auto-delete|disabled the auto-delete|enabled the auto-delete|将消息设置为.*自动删除|禁用自动删除/i.test(content)) { noteSkip('system-msg'); return; }
-    if (inFlight >= 6) { noteSkip('inflight-full'); return; }
+    // 已译快速通道（3.6.10）：src 属性与原文一致、译文还在缓存里时——
+    // 译文盒可能已被 refresh 清理段或页面重渲染摘掉，直接同步补绘，不发请求、不占并发槽。
+    // 原逻辑把「已译」判定挂在 overlay 元素存在上：盒子一被摘，气泡每轮都靠缓存命中
+    // 补绘，而缓存命中的 Promise 异步落定，同步的一轮扫描里会假占满全部并发槽，
+    // 排在后面的真未译气泡每轮撞 inflight-full、永久饿死（真机实测 req 冻结、fail=0）。
+    var srcAttr = safe(function () { return bubble.getAttribute('data-scrm-trans-src'); }, '');
+    if (srcAttr && srcAttr === content && transCache[content]) {
+      if (!existingOverlay) paintTranslation(bubble, content, transCache[content]);
+      return;
+    }
+    if (inFlight >= 6) {
+      noteSkip('inflight-full');
+      // 3.6.10：满载不再直接丢弃——入队，槽位腾出时由 drainQueue 补翻
+      if (transQueue.indexOf(bubble) < 0) transQueue.push(bubble);
+      return;
+    }
     inFlight++;
-    safe(function () { bubble.setAttribute('data-scrm-trans-pending', '1'); }, null);
+    safe(function () {
+      bubble.setAttribute('data-scrm-trans-pending', '1');
+      bubble.setAttribute('data-scrm-trans-pending-at', String(Date.now()));
+    }, null);
     markKeyword(bubble, content);
     // 真实通道：按翻译设置通道分流（谷歌免费 / DeepL / 大模型API），见 translateReal
     translateReal(content).then(function (translated) {
       inFlight--;
-      safe(function () { if (bubble.removeAttribute) bubble.removeAttribute('data-scrm-trans-pending'); }, null);
+      safe(function () {
+        if (bubble.removeAttribute) {
+          bubble.removeAttribute('data-scrm-trans-pending');
+          bubble.removeAttribute('data-scrm-trans-pending-at');
+        }
+      }, null);
+      // 槽位已腾出：先补翻排队中的气泡，再处理自己这条的绘制
+      try { drainQueue(); } catch (e) {}
       if (!translated) { noteSkip('trans-empty'); return; }
       if (!enabled) return;
       if (!bubble.isConnected) return;
-      // 记录翻译源文本，用于虚拟列表 DOM 复用时的变化检测
-      safe(function () { bubble.setAttribute('data-scrm-trans-src', content); }, null);
+      paintTranslation(bubble, content, translated);
+    });
+  }
+
+  // 把译文绘进气泡（3.6.10 从 applyOverlay 的请求回调里抽出，已译补绘与新译共用）：
+  // 记录源文本（虚拟列表 DOM 复用时的变化检测）→ 优先插到文字元素内原文正下方，
+  // 找不到插入点时兜底追加到气泡末尾。
+  function paintTranslation(bubble, content, translated) {
+    // 记录翻译源文本，用于虚拟列表 DOM 复用时的变化检测
+    safe(function () { bubble.setAttribute('data-scrm-trans-src', content); }, null);
       // 直接把译文追加到文字元素内部，确保在气泡里面、原文正下方
       // 用 <br> + 行内元素，避免块级 div 在行内文本容器中布局错乱
       // 修复（2026-10-31）：插入点必须优先用各平台自己的 cfg.texts（如 Meta 系的
@@ -804,7 +1033,6 @@
         box2.appendChild(trans2);
         bubble.appendChild(box2);
       }, null);
-    });
   }
 
   function refresh() {
@@ -818,9 +1046,11 @@
         });
       }
     } catch (e) {}
+    reclaimStalePending(); // 3.6.10：先回收孤儿 pending，免得死标记把气泡永久挡在门外
     var __bubbles = findBubbles();
     diagStats.bubbles = __bubbles.length;
     __bubbles.forEach(applyOverlay);
+    try { drainQueue(); } catch (e) {} // 3.6.10：本轮过后若有空槽，补翻排队气泡
     restoreTimes(); // 把历史版本误藏的时间恢复到可见
   }
 
@@ -917,6 +1147,21 @@
     });
   }, null);
   setInterval(function () { if (enabled) refresh(); }, 5000);
+  // 兜底重扫（3.6.10）：15 秒一轮，只在「页面可见且确有未译气泡」时才真正干活——
+  // 页面隐藏、全译完都不空转。专治各种「被跳过后没人再喊它」的静默落下：
+  // 回收孤儿 pending、补翻排队、仍有没挂译文的气泡就整页重扫一次。
+  setInterval(function () {
+    try {
+      if (!enabled || document.hidden) return;
+      reclaimStalePending();
+      drainQueue();
+      if (inFlight > 0) return; // 还有请求在飞，队列会在落定时自己 drain
+      var bs = findBubbles();
+      for (var i = 0; i < bs.length; i++) {
+        if (bs[i] && bs[i].querySelector && !bs[i].querySelector('[data-scrm="trans-overlay"]')) { refresh(); return; }
+      }
+    } catch (e) {}
+  }, 15000);
   // 语音气泡的「转文字」按钮：独立节流，跟翻译开关无关（关掉翻译也可能只是想听写）
   setInterval(function () { ensureVoiceButtons(); }, 4000);
   setInterval(function () { ensureImgButtons(); }, 4000);
@@ -1125,6 +1370,39 @@
   var inFlight = 0;
   var transReqId = 0;
   var transCache = {};
+  // 并发满载时的等待队列（3.6.10）：被 inflight-full 跳过的气泡进这里，
+  // 任一请求落定腾出槽位就 drainQueue 补翻——不许静默落下
+  var transQueue = [];
+  var transDraining = false;
+  function drainQueue() {
+    if (transDraining) return;
+    transDraining = true;
+    try {
+      while (inFlight < 6 && transQueue.length) {
+        var b = transQueue.shift();
+        if (!b || !b.isConnected) continue;
+        try { if (b.querySelector && b.querySelector('[data-scrm="trans-overlay"]')) continue; } catch (e) {}
+        applyOverlay(b);
+      }
+    } catch (e) {}
+    transDraining = false;
+  }
+  // 孤儿 pending 回收（3.6.10）：请求通道自带 25 秒兜底超时，pending 标记活过 30 秒
+  // 说明那次尝试已经死掉（回调丢失/节点被页面换掉），摘掉标记让气泡重新走流程；
+  // 没有时间戳的旧标记（升级前残留）同样回收
+  function reclaimStalePending() {
+    try {
+      var els = document.querySelectorAll('[data-scrm-trans-pending]');
+      var now = Date.now();
+      for (var i = 0; i < els.length; i++) {
+        var at = parseInt(els[i].getAttribute('data-scrm-trans-pending-at') || '0', 10);
+        if (!at || now - at > 30000) {
+          els[i].removeAttribute('data-scrm-trans-pending');
+          els[i].removeAttribute('data-scrm-trans-pending-at');
+        }
+      }
+    } catch (e) {}
+  }
   // 今日统计上报（2026-10-31）：每次翻译完成上报成功/失败 + 平台 + 耗时，
   // 主进程按天累加，主页「今日概览 / 翻译节点」读出来展示。只统计本机，不外传。
   function bumpStat(ok, ms) {
@@ -2045,5 +2323,12 @@
     require('electron').contextBridge.exposeInMainWorld('__scrmTransOverlay', overlayApi);
   } catch (e) {
     try { window.__scrmTransOverlay = overlayApi; } catch (e2) {}
+  }
+  // 结构快照同理桥到主世界：宿主在设置页点「导出页面结构快照」时，
+  // 对每个会话 webview 调 window.__yichatSnapshot() 取脱敏结构树
+  try {
+    require('electron').contextBridge.exposeInMainWorld('__yichatSnapshot', buildSnapshot);
+  } catch (e) {
+    try { window.__yichatSnapshot = buildSnapshot; } catch (e2) {}
   }
 })();

@@ -68,6 +68,8 @@ contextBridge.exposeInMainWorld('yichat', {
   notify: (payload) => ipcRenderer.invoke('yichat:notify', payload || {}),
   // UI 增强脚本诊断日志（2026-10-31）：主进程落盘 ui-diag.log
   logMessage: (msg) => { try { ipcRenderer.send('yichat:ui-log', String(msg || '')); } catch (e) {} },
+  // 页面结构快照落盘（2026-11-21 3.6.10）：payload {platform, data}，主进程写 userData/snapshots/
+  saveSnapshot: (payload) => ipcRenderer.invoke('yichat:save-snapshot', payload || {}),
   // 今日翻译统计（2026-10-31）：主页「今日概览」用，只读本机计数
   getDailyStats: () => ipcRenderer.invoke('yichat:daily-stats'),
   // 弹窗登录接力（2026-11-21）：主进程开继承指定账号分区的登录窗

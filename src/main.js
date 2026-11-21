@@ -259,6 +259,29 @@ ipcMain.handle('yichat:daily-stats', () => {
   }
 });
 
+// ---- 页面结构快照落盘（2026-11-21，3.6.10）----
+// 设置页「导出页面结构快照」：渲染层从各会话 webview 取回 overlay 生成的脱敏结构树
+// （只含 tag/class/role/尺寸/存在性标记，无任何文本），这里只负责写 userData/snapshots/。
+// 文件名 <平台>-<yyyymmdd-hhmmss>.json；平台名做白名单清洗，防路径穿越。
+ipcMain.handle('yichat:save-snapshot', (event, payload) => {
+  try {
+    assertTrusted(event, 'yichat:save-snapshot');
+    const p = payload || {};
+    const data = p.data;
+    if (!data || typeof data !== 'object' || !data.tree) return { ok: false, message: '快照数据为空' };
+    const plat = String(p.platform || data.platform || 'page').replace(/[^\w-]/g, '').slice(0, 40) || 'page';
+    const fs = require('fs');
+    const dir = path.join(app.getPath('userData'), 'snapshots');
+    fs.mkdirSync(dir, { recursive: true });
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const ts = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+    const name = plat + '-' + ts + '.json';
+    fs.writeFileSync(path.join(dir, name), JSON.stringify(data, null, 1), 'utf8');
+    return { ok: true, name };
+  } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
+});
+
 // 翻译放主进程做（参考 chat-translator 架构）：访客页拦截回车后，把文本发到主进程翻译，
 // 主进程走代理请求谷歌，返回译文。避免访客页网络栈的代理/防火墙问题。
 

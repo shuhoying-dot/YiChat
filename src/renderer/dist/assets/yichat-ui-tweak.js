@@ -1043,6 +1043,56 @@
     var list = document.querySelectorAll('webview');
     for (var i = 0; i < list.length; i++) bindPopup(list[i]);
   }
+
+  // —— 5d) 健康自检（2026-11-21 3.6.10）：overlay 判定某平台翻译静默失效后报上来，
+  // 并入工作台异常条（paintAlert）。签名 = 平台+原因，各自独立关闭记录；
+  // overlay 报恢复（state:'ok'）时连同关闭记录一起清掉，下次再犯能重新出现。
+  var healthMap = {}; // signature -> { platform, reason }
+  var HEALTH_DISMISS_KEY = 'yc-health-dismissed';
+  function healthDismissed() {
+    try { return JSON.parse(localStorage.getItem(HEALTH_DISMISS_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function setHealthDismissed(m) {
+    try { localStorage.setItem(HEALTH_DISMISS_KEY, JSON.stringify(m)); } catch (e) {}
+  }
+  var PLAT_FALLBACK_NAMES = {
+    metabiz: 'Meta Business', facebook: 'Facebook', messenger: 'Messenger',
+    instagram: 'Instagram', telegram: 'Telegram', whatsapp: 'WhatsApp',
+    line: 'Line', linebiz: 'Line Business', zalo: 'Zalo', x: 'X', tiktok: 'TikTok',
+    textnow: 'TextNow', gmessages: 'Google Messages', gvoice: 'Google Voice',
+    gchat: 'Google Chat', snapchat: 'Snapchat', signal: 'Signal', chrome: 'Chrome'
+  };
+  function platDisplayName(key) {
+    try {
+      var ps = railPlatforms();
+      for (var i = 0; i < ps.length; i++) if (ps[i].key === key) return ps[i].name;
+    } catch (e) {}
+    return PLAT_FALLBACK_NAMES[key] || key;
+  }
+  function bindHealth(el) {
+    if (!el || el.__ycHealthBound) return;
+    el.__ycHealthBound = true;
+    el.addEventListener('ipc-message', function (e) {
+      try {
+        if (!e || e.channel !== 'yichat:health') return;
+        var d = e.args && e.args[0];
+        if (!d || !d.signature) return;
+        if (d.state === 'ok') {
+          if (healthMap[d.signature]) delete healthMap[d.signature];
+          var dm = healthDismissed();
+          if (dm[d.signature]) { delete dm[d.signature]; setHealthDismissed(dm); }
+        } else {
+          healthMap[d.signature] = { platform: d.platform || '', reason: d.reason || '' };
+        }
+        var wb = document.getElementById('yc-wb');
+        if (wb) paintAlert(wb);
+      } catch (x) {}
+    });
+  }
+  function bindHealthAll() {
+    var list = document.querySelectorAll('webview');
+    for (var i = 0; i < list.length; i++) bindHealth(list[i]);
+  }
   // —— 5c) 语音发送：页内面板打字 →（可选）翻成英文 → TTS 合成 → 回页内塞进聊天附件
   function ttsEntry() { return resolveEntry('tts'); }
 
@@ -1871,7 +1921,7 @@
 
     // 页脚
     var foot = mkEl('div', 'yc2-foot');
-    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.6.9'));
+    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.6.10'));
     wb.appendChild(foot);
 
     // 事件委托：卡片被反复重建也不会丢点击
@@ -1989,18 +2039,35 @@
       if (on) seen[k] = nmEl ? nmEl.textContent : k;
       else if (seen[k]) items.push('🔌 ' + seen[k] + ' ' + L('已断开，点左侧它的图标重新打开'));
     }
+    // 健康自检行（3.6.10）：与主异常集合分开管理——每条健康异常有自己的签名与
+    // 关闭记录（yc-health-dismissed），恢复时由 bindHealth 连签名一起清掉
+    var hdMap = healthDismissed();
+    var hSigs = Object.keys(healthMap).filter(function (s) { return !hdMap[s]; }).sort();
+    var hLines = hSigs.map(function (s) {
+      var h = healthMap[s];
+      return '⚠ ' + platDisplayName(h.platform) + ' ' + L('翻译未生效：') + h.reason + L('（软件已自动记录日志）');
+    });
     var sig = items.join('|');
-    if (al.getAttribute('data-sig') !== sig) {
+    var hsig = hSigs.join(',');
+    if (al.getAttribute('data-sig') !== sig || al.getAttribute('data-hsig') !== hsig) {
       al.setAttribute('data-sig', sig);
+      al.setAttribute('data-hsig', hsig);
       al.innerHTML = '';
       for (var j = 0; j < items.length; j++) al.appendChild(mkEl('div', 'yc3-alert-line', items[j]));
-      if (items.length) {
+      for (var hj = 0; hj < hLines.length; hj++) al.appendChild(mkEl('div', 'yc3-alert-line', hLines[hj]));
+      if (items.length || hLines.length) {
         var dx = mkEl('span', 'yc3-alert-x', '✕');
         dx.style.cssText = 'float:right;cursor:pointer;opacity:.65;';
         dx.setAttribute('data-yc', '1');
         // 3.6.8：关闭按异常签名存 localStorage（原来只写 DOM 属性，工作台一重建就复活）
+        // 3.6.10：同一次关闭把当前可见的健康签名也一并记下，各回各的记录
         dx.addEventListener('click', function () {
           try { localStorage.setItem('yc-alert-dismissed', al.getAttribute('data-sig') || ''); } catch (e) {}
+          try {
+            var dm2 = healthDismissed();
+            (al.getAttribute('data-hsig') || '').split(',').forEach(function (s) { if (s) dm2[s] = 1; });
+            setHealthDismissed(dm2);
+          } catch (e) {}
           al.style.display = 'none';
         });
         al.appendChild(dx);
@@ -2008,7 +2075,7 @@
     }
     var dismissed = '';
     try { dismissed = localStorage.getItem('yc-alert-dismissed') || ''; } catch (e) {}
-    al.style.display = (items.length && dismissed !== sig) ? 'block' : 'none';
+    al.style.display = ((items.length && dismissed !== sig) || hLines.length) ? 'block' : 'none';
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
     al.style.background = dark ? '#2a1f08' : '#fff7e6';
     al.style.borderColor = dark ? '#6b4e12' : '#ffd591';
@@ -2505,6 +2572,85 @@
       if (rows[i].style.display !== (hit ? '' : 'none')) rows[i].style.display = hit ? '' : 'none';
     }
   }
+  // —— 设置页 · 性能监控：页面结构快照导出（2026-11-21 3.6.10）——
+  // 平台页改版是翻译静默失效的头号原因。把当前打开的会话页结构（由 overlay 生成、
+  // 只含 tag/class/role/尺寸/存在性标记，绝无聊天文字）落盘到数据目录 snapshots/，
+  // 为「真页面回归基线」备料。卡片只挂在性能监控面板（诊断类）末尾。
+  function ensureSnapCard() {
+    var panel = document.querySelector('.settings-main .set-panel');
+    if (!panel || !panel.querySelector('.perf-top')) return;
+    if (panel.querySelector('.yc-snap-card')) return;
+    var card = mkEl('div', 'perf-card yc-snap-card');
+    card.style.marginTop = '16px';
+    card.appendChild(mkEl('div', 'perf-metric-label', L('页面结构快照')));
+    // 入口不在设置页：应用离开会话页就销毁 webview（实测设置页内 guest 已不存在），
+    // 导出只能在会话页内触发——按钮以浮动形式挂在会话页右下角，这里只放说明
+    card.appendChild(mkEl('div', 'perf-metric-sub', L('打开任意会话页面时，右下角会出现「导出结构快照」按钮：点它即可把当时打开的会话页面结构导出到本机（只含结构，不含任何聊天文字），用于定位平台改版导致的翻译失效。文件保存在数据目录的 snapshots 文件夹。')));
+    panel.appendChild(card);
+  }
+  // 会话页浮动导出按钮：DOM 里有会话 webview 时才存在（无会话自动撤下）
+  function ensureSnapFab() {
+    var has = false;
+    var list = document.querySelectorAll('webview');
+    for (var i = 0; i < list.length; i++) {
+      var src = '';
+      try { src = list[i].getAttribute('src') || ''; } catch (e) {}
+      if (src && src !== 'about:blank') { has = true; break; }
+    }
+    var fab = document.querySelector('.yc-snap-fab');
+    if (!has) { if (fab) fab.remove(); return; }
+    if (fab) return;
+    fab = mkEl('button', 'yc-snap-fab', L('导出结构快照'));
+    fab.type = 'button';
+    fab.setAttribute('data-yc', '1');
+    fab.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99990;background:#005dff;color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:13px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.35);';
+    fab.addEventListener('click', function () { exportSnapshots(fab); });
+    document.body.appendChild(fab);
+  }
+  function exportSnapshots(btn) {
+    var api = yapi();
+    if (!api || typeof api.saveSnapshot !== 'function') { toast(L('当前版本不支持快照导出'), true); return; }
+    var wvs = [];
+    var list = document.querySelectorAll('webview');
+    for (var i = 0; i < list.length; i++) {
+      var src = '';
+      try { src = list[i].getAttribute('src') || ''; } catch (e) {}
+      if (src && src !== 'about:blank') wvs.push(list[i]);
+    }
+    if (!wvs.length) { toast(L('还没有打开的会话页面，先去打开一个会话再导出'), true); return; }
+    var old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = L('导出中…');
+    var okNames = [], missed = [];
+    var jobs = wvs.map(function (el) {
+      var label = '页面';
+      try { label = new URL(el.getAttribute('src')).host || label; } catch (e) {}
+      var job = Promise.resolve()
+        .then(function () { return el.executeJavaScript('window.__yichatSnapshot ? window.__yichatSnapshot() : null'); })
+        .then(function (snap) {
+          if (!snap || !snap.tree) { missed.push(label); return null; }
+          return Promise.resolve(api.saveSnapshot({ platform: snap.platform || '', data: snap })).then(function (r) {
+            if (r && r.ok) okNames.push(r.name || ((snap.platform || 'page') + '.json'));
+            else missed.push(label);
+          });
+        })
+        .catch(function () { missed.push(label); });
+      // 单个页面卡住不能拖死整批：6 秒超时按没拿到计
+      return Promise.race([job, new Promise(function (res) { setTimeout(res, 6000); })]);
+    });
+    Promise.all(jobs).then(function () {
+      btn.disabled = false;
+      btn.textContent = old;
+      if (okNames.length) {
+        var msg = L('已导出 ') + okNames.length + L(' 个页面结构快照');
+        if (missed.length) msg += '；' + missed.length + L(' 个没拿到（') + missed.join('、') + '）';
+        toast(msg);
+      } else {
+        toast(L('一个快照都没拿到：') + missed.join('、'), true);
+      }
+    });
+  }
+
   // —— 设置页：「禁止发送…」两项是哑雷（误开会静默拦消息），给标签加橙色「谨慎」标 ——
   function markWarnRows() {
     var labels = document.querySelectorAll('.set-switch-label');
@@ -2528,6 +2674,7 @@
     try { bindVoiceAll(); } catch (e) {}
     try { bindImgAll(); } catch (e) {}
     try { bindPopupAll(); } catch (e) {}
+    try { bindHealthAll(); } catch (e) {}         // 健康自检：平台翻译静默失效上报
     try { bindTtsAll(); } catch (e) {}            // 图片消息：看图          // 语音气泡：转文字
     try { ensureToolDock(); } catch (e) {}        // 右栏底部 5 个速用键（逐栏）
     try { /* 右栏「翻译」角标已删除（2026-11-01） */ } catch (e) {}
@@ -2539,6 +2686,8 @@
     try { ensurePlatSearch(); } catch (e) {}      // 设置页：平台列表搜索框
     try { applyPlatFilter(); } catch (e) {}       // 设置页：平台搜索过滤（重渲染后补回）
     try { markWarnRows(); } catch (e) {}          // 设置页：「禁止发送」两项加谨慎标
+    try { ensureSnapCard(); } catch (e) {}        // 设置页 · 性能监控：页面结构快照说明卡
+    try { ensureSnapFab(); } catch (e) {}         // 会话页：结构快照导出浮动按钮（有会话 webview 才在）
     try { armPinObserver(); } catch (e) {}        // 浮钮被重建时即时补类（不等心跳，防闪跳）
     try { ensureEmptyHint(); } catch (e) {}       // 空态一次性提示
     try { markSettingsTitle(); } catch (e) {}     // 齿轮 title 提示
