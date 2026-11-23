@@ -278,12 +278,16 @@
     try { if (cfg && cfg.texts) textsFound = document.querySelectorAll(cfg.texts.join(',')).length; } catch (e1) {}
     try { roleRows = document.querySelectorAll('div[role="row"]').length; } catch (e2) {}
     var composer = false, scope = false;
-    try { composer = !!findComposerEl(); } catch (e3) {}
-    try { scope = !!resolveScope(); } catch (e4) {}
+    // 3.8.1（S8）：findComposerEl 只算一次，composer 标记与祖先链共用同一结果
+    //（原来一轮探针里调两遍）；scope 走 peekScope 复用级联缓存，不重复真算
+    var composerEl = null;
+    try { composerEl = findComposerEl(); } catch (e3) {}
+    composer = !!composerEl;
+    try { scope = !!peekScope(); } catch (e4) {}
     // 3.6.9：被认出的输入框的祖先链——真实页面 scope 定位失败时，
     // 靠它看清输入框到底住在哪个子树、离线程气泡有多深
     var composerChain = '';
-    try { var cel9 = findComposerEl(); if (cel9) composerChain = dumpAncestorChain(cel9); } catch (e9) {}
+    try { if (composerEl) composerChain = dumpAncestorChain(composerEl); } catch (e9) {}
     // 输入框候选元素详情（诊断发送翻译为何失效）
     var composerInfo = '';
     try {
@@ -315,6 +319,9 @@
     return {
       url: String(location.href || '').slice(0, 120),
       platformKey: profilePlatformKey,
+      selfDbg: (typeof window !== 'undefined' && window.__ycSelfDbg) || null,
+      // 3.6.12：登录/授权页标记——健康自检据此跳过评估，日志里也能直接看出页面状态
+      authPage: (function () { try { return detectAuthPage(); } catch (e) { return false; } })(),
       hasCfg: !!cfg,
       cfgTextsFound: textsFound,
       roleRows: roleRows,
@@ -347,13 +354,15 @@
     };
   }
   function sendDiag() {
+    // 3.8.1（S8）：页面隐藏时跳过——后台会话不空转做全页探测；周期也由 8s 降为 20s
+    try { if (document.hidden) return; } catch (e) {}
     var d = null;
     try { d = collectDiag(); } catch (e) {}
     // 3.6.10：健康自检与诊断共用同一份周期数据（评估在上报之前做，互不影响）
     try { if (d) evalHealth(d); } catch (e) {}
     try { if (ipc && ipc.send && d) ipc.send('yichat:overlay-diag', d); } catch (e) {}
   }
-  setInterval(sendDiag, 8000);
+  setInterval(sendDiag, 20000);
   setTimeout(sendDiag, 2500);
 
   // ================= 健康自检（3.6.10） =================
@@ -364,6 +373,49 @@
   // 判定从严：没开会话、刚打开页面（宽限期 15 秒）、样本已是目标语言，一律不报。
   var healthState = { navAt: Date.now(), lastUrl: '', prev: null, streak: 0, bad: null, okResend: null, healthyStreak: 0, clearedOk: false };
   var HEALTH_REASONS = ['找不到输入框', '找不到会话区', '翻译请求失败', '有消息未被翻译'];
+  // —— 登录/授权页识别（3.6.12）——
+  // 真机教训（2026-11-21 22:16 截图）：WhatsApp 停在扫码登录页、根本没进会话时，
+  // 登录页上的英文串（"WhatsApp" 等）骗过「有待译内容」判定，composer 不存在 →
+  // 误报「找不到输入框」。登录页不是翻译故障：评估前先判页面状态，命中就不评估、
+  // 不上报（bad 不发；此前已报过的，进登录页也不算恢复、不发 ok，宿主保持原状）。
+  // 判据分两层：①各平台登录页特征（URL 路径/页面标志，下表可扩展）；
+  // ②通用特征——可见密码框＋无输入框＋无会话区（IG/FB 真登录页无实测数据，
+  // 不按某一页的 DOM 过拟合，靠这条兜底）。
+  var AUTH_PAGE_RULES = [
+    { // facebook.com / messenger.com 的登录路径
+      host: /(^|\.)(facebook|messenger)\.com$/,
+      test: function () { return /\/login(\.php)?([/?#]|$)/.test(String(location.pathname || '') + String(location.search || '')); }
+    },
+    { // instagram 登录路径
+      host: /(^|\.)instagram\.com$/,
+      test: function () { return /\/accounts\/login/.test(String(location.pathname || '')); }
+    },
+    { // WhatsApp：登录/加载页没有会话列表（#pane-side）也没有会话主区（#main）
+      host: /whatsapp/,
+      test: function () { return !document.querySelector('#pane-side') && !document.querySelector('#main'); }
+    }
+  ];
+  function detectAuthPage() {
+    try {
+      var host = String(location.hostname || '');
+      for (var i = 0; i < AUTH_PAGE_RULES.length; i++) {
+        var rule = AUTH_PAGE_RULES[i];
+        try { if (rule.host.test(host) && rule.test()) return true; } catch (e1) {}
+      }
+      // 通用兜底：可见的密码输入框存在，且既找不到输入框也定位不到会话区
+      var pws = document.querySelectorAll('input[type="password"]');
+      for (var j = 0; j < pws.length; j++) {
+        var r = pws[j].getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          var hasComposer = false, hasScope = false;
+          try { hasComposer = !!findComposerEl(); } catch (e2) {}
+          try { hasScope = !!resolveScope(); } catch (e3) {}
+          if (!hasComposer && !hasScope) return true;
+        }
+      }
+      return false;
+    } catch (e) { return false; }
+  }
   // 抗污染版样本判断：译文盒绘在气泡内时，diag 样本的 textContent 会把译文连进来
   // （如 'What are the fees?这是模拟译文'），整段判定会被目标语言占比冲掉。按 CJK
   // 分段，只要有一段含 ≥4 个拉丁字母，就认为样本里还有外语原文（部分已译也算有内容）
@@ -416,6 +468,9 @@
       healthState.streak = 0;
     }
     if (url) healthState.lastUrl = url;
+    // 3.6.12：登录/授权页不评估——bad 不发、ok 不发（进登录页不算恢复，宿主保持
+    // 原状）；基线一并作废，离开登录页后从首个周期重新记，避免跨页增量误判
+    if (d.authPage) { healthState.prev = null; healthState.streak = 0; return; }
     // 恢复通知重发（60 秒内每周期一次）：ok 是边沿事件，宿主在视图切换/重绑
     // webview 的空窗里可能错过单次发送——错过一次，签名就永远清不掉、同因再犯也不再出现
     if (healthState.okResend) {
@@ -467,10 +522,15 @@
     var hasContent = (d.bubblesLastScan || 0) > 0 && sampleHasForeign(d.sampleText);
     if (!hasContent || !cfgOk) { if (!healthState.bad) healthState.streak = 0; return; }
     var dReq = cur.req - prev.req, dOk = cur.ok - prev.ok, dFail = cur.fail - prev.fail, dSkips = cur.skips - prev.skips;
+    // 3.6.12 第二道门：页面上连会话的迹象都没有（无候选文本、无列表行、无输入框、
+    // 无会话区）时，「找不到输入框/会话区」类原因不成立——多半是没打开会话或落错
+    // 页面，不是翻译坏了。请求全失败是通道问题、与页面状态无关，不受这道门限制。
+    var sessionTrace = (d.cfgTextsFound || 0) > 0 || (d.roleRows || 0) > 0 || !!d.composerFound || !!d.scopeFound;
     var cycleBad = false;
-    if (dOk === 0 && dReq === 0 && dSkips > 0) cycleBad = true;             // 有跳过、无请求：静默失效
+    if (dOk === 0 && dReq > 0 && dFail > 0) cycleBad = true;           // 请求在发、全失败
+    else if (!sessionTrace) cycleBad = false;                          // 无会话迹象：DOM 类原因不报
+    else if (dOk === 0 && dReq === 0 && dSkips > 0) cycleBad = true;   // 有跳过、无请求：静默失效
     else if (dOk === 0 && dReq === 0 && d.scopeFound === false) cycleBad = true; // 会话区恒为空
-    else if (dOk === 0 && dReq > 0 && dFail > 0) cycleBad = true;           // 请求在发、全失败
     if (cycleBad) { healthState.streak++; healthState.healthyStreak = 0; }
     else {
       if (!healthState.bad) healthState.streak = 0;
@@ -823,6 +883,18 @@
   //   节点的最小祖先（全程达不到 3 时降级取含 ≥1 的最小祖先）。
   // 三级 height：原 applyOverlay 内的高度兜底（>40% 视口、≤8 层、取最高合格者），
   //   3.6.9 起加条件：祖先必须含 ≥1 个候选文本节点，杜绝选到输入框所在的独立面板。
+  // 诊断探针专用（3.8.1 S8）：优先复用 resolveScope 的既有缓存结果——探针周期
+  // 20s 与级联缓存 3s 对不齐，原来探针每轮都把 composer/scope 级联全量真算一遍。
+  // 25 秒内有缓存结果（命中元素或已确认的空结果）就直接用，不触发重算。
+  function peekScope() {
+    try {
+      if (rScopeAt && Date.now() - rScopeAt < 25000) {
+        if (!rScopeEl) return null;
+        if (rScopeEl.isConnected) return rScopeEl;
+      }
+    } catch (e) {}
+    return resolveScope();
+  }
   function resolveScope() {
     var now = Date.now();
     if (rScopeEl && rScopeEl.isConnected && now - rScopeAt < 3000) return rScopeEl;
@@ -940,8 +1012,8 @@
     // 补绘，而缓存命中的 Promise 异步落定，同步的一轮扫描里会假占满全部并发槽，
     // 排在后面的真未译气泡每轮撞 inflight-full、永久饿死（真机实测 req 冻结、fail=0）。
     var srcAttr = safe(function () { return bubble.getAttribute('data-scrm-trans-src'); }, '');
-    if (srcAttr && srcAttr === content && transCache[content]) {
-      if (!existingOverlay) paintTranslation(bubble, content, transCache[content]);
+    if (srcAttr && srcAttr === content && transCache[transCacheKey(content)]) {
+      if (!existingOverlay) paintTranslation(bubble, content, transCache[transCacheKey(content)]);
       return;
     }
     if (inFlight >= 6) {
@@ -1162,9 +1234,7 @@
       }
     } catch (e) {}
   }, 15000);
-  // 语音气泡的「转文字」按钮：独立节流，跟翻译开关无关（关掉翻译也可能只是想听写）
-  setInterval(function () { ensureVoiceButtons(); }, 4000);
-  setInterval(function () { ensureImgButtons(); }, 4000);
+  // 语音/看图/TTS 三个 ensure 定时器 3.8.1 起合并为一个 4s 周期，见文件末尾 ensureTtsUi 定义后
 
 
   // 当前平台标识：宿主经 setTransConfig 下发；没下发时从网址自动识别
@@ -1447,8 +1517,14 @@
   // 通道（谷歌 / DeepL / 大模型API）与代理都由宿主主进程决定，页内只转发请求
   // 谷歌免费翻译（gtx 接口，无需 Key）。跑在 webview 访客页里，
   // 网络请求自动走该会话的代理配置；全程 try/catch，失败返回空字符串。
+  // 缓存键（3.8.1 S9）：拼上目标语言＋接收通道——原来只用原文文本做键，
+  // 用户改了目标语言或通道后旧译文继续命中（改成中文仍给英文译文），
+  // 要等 300 条上限挤掉才恢复。键里带上配置后，配置一变自然不再命中旧条目。
+  function transCacheKey(text) {
+    return String(transCfg.targetLang || '') + '|' + String(transCfg.channel || '') + '|' + String(text || '').trim();
+  }
   function cacheTranslation(t, translated) {
-    transCache[t] = translated;
+    transCache[transCacheKey(t)] = translated;
     // 缓存上限，避免长会话内存膨胀
     var keys = Object.keys(transCache);
     if (keys.length > 300) delete transCache[keys[0]];
@@ -1457,7 +1533,7 @@
   function translateReal(text) {
     var t = String(text || '').trim();
     if (!t) return Promise.resolve('');
-    if (transCache[t]) return Promise.resolve(transCache[t]);
+    if (transCache[transCacheKey(t)]) return Promise.resolve(transCache[transCacheKey(t)]);
     // 页内 fetch 会被 CORS 拦截（translate.google.com 无 ACAO 头），直接走宿主 IPC，
     // 由主进程经该账号代理请求，不受 CORS 限制
     return requestTranslate(t, transCfg.targetLang).then(function (r) {
@@ -2239,7 +2315,13 @@
       if (!has) ttsUi.panel.style.display = 'none';
     } catch (e) {}
   }
-  setInterval(ensureTtsUi, 2000);
+  // 3.8.1（S8）：TTS（原 2s）/语音钮（原 4s）/看图钮（原 4s）三个 ensure 定时器
+  // 合并为一个 4s 周期——每 webview 常驻定时器从 8 个降到 6 个
+  setInterval(function () {
+    try { ensureTtsUi(); } catch (e) {}
+    try { ensureVoiceButtons(); } catch (e) {}
+    try { ensureImgButtons(); } catch (e) {}
+  }, 4000);
 
   // IPC 直达通道：宿主用 webview.send 下发配置/译文，不依赖 window 对象在主世界可见
   if (ipc && ipc.on) {
@@ -2315,6 +2397,379 @@
     // 宿主翻译结果回填（requestTranslate 的应答）
     deliverTranslation: function (reqId, ok, text) { deliverTranslation(reqId, ok, text); return true; },
   };
+  // ================= 本人资料抓取（2026-11-23 3.8.3）=================
+  // 宿主账号卡显示真实头像/昵称：从平台页读本人资料，经 scrm:profile 回宿主
+  // （宿主 onProfileUpdate → Ze 落盘）。铁律：只读已验结构 + 本人锚点；
+  // 读不到就静默，绝不猜、绝不把别人的资料写成自己的。
+  // 结构依据（真机快照）：TG telegram-20261123-162509；WA whatsapp-20261123-162659/162925/163046。
+  var ycSelfSentKey = '';
+  var ycSelfBusy = false;
+  var ycSelfDone = false;      // 已成功拿到带名字的资料
+  var ycSelfNamedSent = false; // 已回过带名字的资料（之后忽略仅头像的回退结果）
+  var ycSelfLastTryKey = '';
+  var ycLastInputAt = Date.now();
+  try {
+    ['keydown', 'mousedown', 'wheel', 'touchstart'].forEach(function (ev) {
+      window.addEventListener(ev, function () { ycLastInputAt = Date.now(); }, true);
+    });
+  } catch (e) {}
+
+  function ycSelfDbg(step) {
+    try {
+      var d = window.__ycSelfDbg || (window.__ycSelfDbg = { tries: 0, steps: [] });
+      d.steps.push(step);
+      if (d.steps.length > 24) d.steps.shift();
+      d.at = Date.now();
+    } catch (e) {}
+  }
+  // 合成真实鼠标事件序列：有些平台按钮只认 mousedown/pointerdown，裸 .click() 点不动
+  function ycRealClick(el) {
+    if (!el) return;
+    try {
+      var r = el.getBoundingClientRect();
+      var opts = { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function (t) {
+        try { el.dispatchEvent(new MouseEvent(t, opts)); } catch (e) {}
+      });
+    } catch (e) { try { el.click(); } catch (e2) {} }
+  }
+  // 每号一次标记（存平台页 localStorage，随账号分区持久）：抓到过带名字的资料后，
+  // 自动开页永久停用——自动开页只是新号的首次引导，不是每次启动的例行动作（3.8.6 定版设计）。
+  var YC_SELF_FLAG_KEY = 'yc-self-captured-v1';
+  function ycSelfHasFlag() {
+    try { return !!localStorage.getItem(YC_SELF_FLAG_KEY); } catch (e) { return false; }
+  }
+  function ycSelfSetFlag() {
+    try { localStorage.setItem(YC_SELF_FLAG_KEY, String(Date.now())); } catch (e) {}
+  }
+  function ycSelfSend(p) {
+    if (!p || (!p.name && !p.phone && !p.avatarUrl)) return;
+    if (!p.name && ycSelfNamedSent) return; // 已有带名字的资料，别让小头像回退覆盖
+    var key = (p.name || '') + '|' + (p.phone || '') + '|' + (p.avatarUrl ? p.avatarUrl.length + ':' + p.avatarUrl.slice(0, 48) : '');
+    if (key === ycSelfSentKey) return;
+    ycSelfSentKey = key;
+    if (p.name) { ycSelfDone = true; ycSelfNamedSent = true; ycSelfSetFlag(); }
+    ycSelfDbg('sent:' + (p.name ? 'named' : 'avatar-only'));
+    try { ipc.sendToHost('scrm:profile', { self: true, name: p.name || '', phone: p.phone || '', avatarUrl: p.avatarUrl || '' }); } catch (e) {}
+  }
+
+  // 图片地址 → data:image（宿主只收 data:image/）。fetch→blob→FileReader，不走 canvas 防污染。
+  function ycUrlToDataUrl(url, done) {
+    if (!url) { done(''); return; }
+    if (url.indexOf('data:image/') === 0) { done(url); return; }
+    try {
+      fetch(url).then(function (r) { return r.blob(); }).then(function (b) {
+        try {
+          var fr = new FileReader();
+          fr.onload = function () { done(String(fr.result || '')); };
+          fr.onerror = function () { done(''); };
+          fr.readAsDataURL(b);
+        } catch (e) { done(''); }
+      }).catch(function () { done(''); });
+    } catch (e) { done(''); }
+  }
+  function ycAvatarFromEl(el, done) {
+    if (!el) { done(''); return; }
+    try {
+      var cv = el.tagName === 'CANVAS' ? el : el.querySelector('canvas');
+      if (cv) { try { done(cv.toDataURL('image/jpeg', 0.85)); return; } catch (e) {} }
+      var img = el.tagName === 'IMG' ? el : el.querySelector('img');
+      var src = '';
+      if (img) src = img.currentSrc || img.src || '';
+      if (!src) {
+        var bg = '';
+        try { bg = getComputedStyle(el).backgroundImage || ''; } catch (e) {}
+        var m = /url\(["']?([^"')]+)["']?\)/.exec(bg);
+        if (m) src = m[1];
+      }
+      if (!src) { done(''); return; }
+      ycUrlToDataUrl(src, done);
+    } catch (e) { done(''); }
+  }
+
+  // —— Telegram（Web K）：本人资料页 .profile-content.is-me（is-me 为本人锚点，别人资料页没有）——
+  // 名字 .profile-name；头像 .avatar.avatar-120 img.avatar-photo；电话在资料区 .row-title 呈 +号码 形。
+  function ycReadTelegram() {
+    var root = document.querySelector('.profile-content.is-me');
+    if (!root) return null;
+    // 只读真正打开着的资料层：隐藏状态（display:none）下残留的 DOM 不算数
+    try { if (!root.getClientRects().length) return null; } catch (e) {}
+    var nameEl = root.querySelector('.profile-name');
+    var name = nameEl ? String(nameEl.textContent || '').trim() : '';
+    var phone = '';
+    var titles = root.querySelectorAll('.row .row-title');
+    for (var i = 0; i < titles.length; i++) {
+      var v = String(titles[i].textContent || '').trim();
+      if (/^\+[\d\s-]{5,}$/.test(v)) { phone = v.replace(/[\s-]/g, ''); break; }
+    }
+    var img = root.querySelector('.avatar.avatar-120 img.avatar-photo') ||
+              root.querySelector('.profile-avatars-container img.avatar-photo');
+    return { name: name, phone: phone, avatarEl: img || null };
+  }
+
+  // —— WhatsApp：类名混淆不可用，全靠几何 + 文本形状 ——
+  // 本人资料/设置面板在左列（宽 380–560、贴左），顶部有 100–140px 方形本人照片；
+  // 名字取照片下方第一段 ≥16px 文本，电话取面板内 +号码 形状文本。
+  // 面板读不到时回退：左栏窄轨里带 img 的按钮是本人头像钮（只有头像、无名字）。
+  function ycWaPanel() {
+    var all = document.querySelectorAll('div, section, span, img');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      var r = el.getBoundingClientRect();
+      if (r.width < 100 || r.width > 140 || Math.abs(r.width - r.height) > 8) continue;
+      if (r.left < 56 || r.left > 560 || r.top < 40 || r.top > 340) continue;
+      var bg = '';
+      try { bg = getComputedStyle(el).backgroundImage || ''; } catch (e) {}
+      var hasMedia = !!el.querySelector('img, canvas') || el.tagName === 'IMG' || bg.indexOf('url(') === 0;
+      if (!hasMedia) continue;
+      var p = el;
+      var rootFound = null;
+      for (var d = 0; d < 14 && p; d++) {
+        var pr = p.getBoundingClientRect();
+        if (pr.width >= 380 && pr.width <= 560 && pr.left <= 76) rootFound = p;
+        else if (rootFound) break;
+        p = p.parentElement;
+      }
+      if (rootFound) return { root: rootFound, photo: el };
+    }
+    return null;
+  }
+  function ycReadWhatsApp() {
+    var found = ycWaPanel();
+    if (!found) {
+      var rail = document.querySelector('header');
+      if (rail) {
+        var btns = rail.querySelectorAll('button');
+        for (var i = btns.length - 1; i >= 0; i--) {
+          var im = btns[i].querySelector('img');
+          if (im) return { name: '', phone: '', avatarEl: im };
+        }
+      }
+      return null;
+    }
+    var root = found.root;
+    var phone = '';
+    var name = '';
+    var photoBottom = found.photo.getBoundingClientRect().bottom;
+    var leaves = root.querySelectorAll('span, div, h2');
+    for (var j = 0; j < leaves.length; j++) {
+      var el = leaves[j];
+      if (el.children && el.children.length) continue;
+      var t = String(el.textContent || '').trim();
+      if (!t || t.length > 80) continue;
+      var r = el.getBoundingClientRect();
+      if (r.height === 0) continue;
+      if (!phone && /^\+[\d\s-]{5,}$/.test(t)) phone = t.replace(/[\s-]/g, '');
+      if (!name && r.top >= photoBottom - 4) {
+        var fs = 0;
+        try { fs = parseFloat(getComputedStyle(el).fontSize) || 0; } catch (e) {}
+        if (fs >= 16 && !/^\+/.test(t)) name = t;
+      }
+      if (name && phone) break;
+    }
+    return { name: name, phone: phone, avatarEl: found.photo };
+  }
+
+  var YC_SELF_READERS = { telegram: ycReadTelegram, whatsapp: ycReadWhatsApp };
+
+  function ycSelfRead() {
+    var reader = YC_SELF_READERS[String(profilePlatformKey || '').toLowerCase()];
+    if (!reader) return;
+    var got = reader();
+    if (!got || (!got.name && !got.phone && !got.avatarEl)) return;
+    if (!got.avatarEl) { ycSelfSend(got); return; }
+    var tryKey = (got.name || '') + '|' + (got.phone || '') + '|avatar';
+    if (tryKey === ycSelfLastTryKey && ycSelfDone) return;
+    ycSelfLastTryKey = tryKey;
+    ycSelfBusy = true;
+    ycAvatarFromEl(got.avatarEl, function (url) {
+      ycSelfBusy = false;
+      got.avatarUrl = url || '';
+      delete got.avatarEl;
+      ycSelfSend(got);
+    });
+  }
+  function ycSelfTick() {
+    try { if (!ipc || !ipc.sendToHost || ycSelfBusy) return; ycSelfRead(); } catch (e) { ycSelfBusy = false; }
+  }
+
+  // —— 闲时自动打开本人资料：每页加载成功前最多 3 次，闲置 8 秒才动，读完关回去 ——
+  var ycAutoTries = 0;
+  function ycCloseWhenDone(closeFn, deadline) {
+    var iv = setInterval(function () {
+      if (ycSelfDone || Date.now() > deadline) {
+        clearInterval(iv);
+        try { closeFn(); } catch (e) {}
+      }
+    }, 400);
+  }
+  var YC_SETTINGS_LABELS = ['settings', '设置', '設置', '設定', 'настройки', 'paramètres', 'einstellungen'];
+  function ycFindSettingsItem(menu) {
+    if (!menu) return null;
+    var items = menu.querySelectorAll('.btn-menu-item');
+    if (!items.length) items = menu.querySelectorAll('button, [role="menuitem"], li');
+    var i, j, k;
+    // 第一遍：逐个后代文本精确匹配（菜单项里有图标字体字形污染 textContent，不能整项比）
+    for (i = 0; i < items.length; i++) {
+      var nodes = [items[i]].concat(Array.prototype.slice.call(items[i].querySelectorAll('*')));
+      for (j = 0; j < nodes.length; j++) {
+        var t = String(nodes[j].textContent || '').trim().toLowerCase();
+        if (YC_SETTINGS_LABELS.indexOf(t) >= 0) return items[i];
+      }
+    }
+    // 第二遍：整项文本含标签且足够短（防误中长文本项）
+    for (i = 0; i < items.length; i++) {
+      var full = String(items[i].textContent || '').trim().toLowerCase();
+      for (k = 0; k < YC_SETTINGS_LABELS.length; k++) {
+        if (full.indexOf(YC_SETTINGS_LABELS[k]) >= 0 && full.length <= YC_SETTINGS_LABELS[k].length + 4) return items[i];
+      }
+    }
+    return null;
+  }
+  // 隐形罩（3.8.7）：自动打开期间把菜单/设置层罩成透明且不可点——布局、渲染、数据
+  // 一切照常，只是用户屏幕上什么都看不见。用 opacity 而非 display/visibility：
+  // 不触发平台自身的可见性逻辑，头像加载与几何读取都不受影响。
+  var ycCloakEl = null;
+  function ycCloakOn() {
+    try {
+      if (ycCloakEl) return;
+      var st = document.createElement('style');
+      st.setAttribute('data-yc-cloak', '1');
+      st.textContent = '.btn-menu, .settings-layer { opacity: 0 !important; pointer-events: none !important; }';
+      (document.head || document.documentElement).appendChild(st);
+      ycCloakEl = st;
+      ycSelfDbg('cloak:on');
+      setTimeout(ycCloakOff, 9000); // 安全阀：任何路径漏撤，9 秒自动撤
+    } catch (e) {}
+  }
+  function ycCloakOff() {
+    try { if (ycCloakEl && ycCloakEl.parentNode) ycCloakEl.parentNode.removeChild(ycCloakEl); } catch (e) {}
+    ycCloakEl = null;
+  }
+  function ycTgBurger() {
+    var b = document.querySelector('.sidebar-header .btn-menu-toggle') ||
+            document.querySelector('.btn-menu-toggle.sidebar-tools-button');
+    if (b) return b;
+    // 兜底：左上区域内可见的任意 .btn-menu-toggle（页面里另有一个隐藏的同类钮）
+    var all = document.querySelectorAll('.btn-menu-toggle');
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i].getBoundingClientRect();
+      if (r.width > 0 && r.left < 160 && r.top < 100) return all[i];
+    }
+    return null;
+  }
+  function ycTgAuto() {
+    var burger = ycTgBurger();
+    if (!burger) { ycSelfDbg('tg:no-burger'); return false; }
+    ycSelfDbg('tg:burger');
+    ycCloakOn();
+    ycRealClick(burger);
+    setTimeout(function () {
+      try {
+        var menu = document.querySelector('.btn-menu');
+        ycSelfDbg(menu ? 'tg:menu-open' : 'tg:no-menu');
+        var item = ycFindSettingsItem(menu);
+        ycSelfDbg(item ? 'tg:item-found' : 'tg:no-item');
+        if (item) ycRealClick(item);
+      } catch (e) { ycSelfDbg('tg:menu-err'); }
+      setTimeout(function () {
+        ycSelfDbg(document.querySelector('.profile-content.is-me') ? 'tg:profile-visible' : 'tg:profile-missing');
+        ycSelfRead();
+        ycCloseWhenDone(function () {
+          var cb = document.querySelector('.settings-layer .sidebar-close-button') ||
+                   document.querySelector('.profile-container .sidebar-close-button');
+          if (cb) { ycRealClick(cb); setTimeout(ycCloakOff, 350); return; }
+          if (document.querySelector('.btn-menu')) ycRealClick(burger);
+          setTimeout(ycCloakOff, 350);
+        }, Date.now() + 3200);
+      }, 1300);
+    }, 700);
+    return true;
+  }
+  function ycWaAuto() {
+    var rail = document.querySelector('header');
+    if (!rail) return false;
+    var btns = rail.querySelectorAll('button');
+    var target = null;
+    for (var i = 0; i < btns.length; i++) if (btns[i].querySelector('img')) target = btns[i];
+    if (!target) { ycSelfDbg('wa:no-rail-btn'); return false; }
+    ycSelfDbg('wa:rail-click');
+    ycRealClick(target);
+    // WA 面板类名混淆、罩不了 CSS：轮询找到面板根就地隐形（opacity 不影响几何读取）
+    var waCloaked = null;
+    var waCloakIv = setInterval(function () {
+      try {
+        var f = ycWaPanel();
+        if (f && f.root && f.root !== waCloaked) {
+          waCloaked = f.root;
+          waCloaked.style.opacity = '0';
+          waCloaked.style.pointerEvents = 'none';
+          ycSelfDbg('wa:cloaked');
+        }
+      } catch (e) {}
+    }, 60);
+    var waUncloak = function () {
+      clearInterval(waCloakIv);
+      try { if (waCloaked) { waCloaked.style.opacity = ''; waCloaked.style.pointerEvents = ''; } } catch (e) {}
+      waCloaked = null;
+    };
+    setTimeout(waUncloak, 9000); // 安全阀
+    setTimeout(function () {
+      ycSelfRead();
+      ycCloseWhenDone(function () {
+        var found = ycWaPanel();
+        if (found) {
+          var hdr = found.root.querySelector('header');
+          var back = hdr ? hdr.querySelector('button') : null;
+          if (back) ycRealClick(back);
+        }
+        setTimeout(waUncloak, 350);
+      }, Date.now() + 3200);
+    }, 1300);
+    return true;
+  }
+  var YC_SELF_AUTO = { telegram: ycTgAuto, whatsapp: ycWaAuto };
+  // 就绪探针：平台主界面关键钮出现才算「能抓」。3.8.4 真机教训（overlay-diag 实锤）：
+  // 新会话登录同步期间菜单钮还没渲染，旧版 3 次尝试全烧在 tg:no-burger 上、
+  // 界面好了也不再试 → 必须「未就绪不计数、就绪跃迁时重置计数」。
+  function ycSelfReady() {
+    var key = String(profilePlatformKey || '').toLowerCase();
+    try {
+      if (key === 'telegram') return !!ycTgBurger();
+      if (key === 'whatsapp') {
+        var h = document.querySelector('header');
+        if (!h) return false;
+        var bs = h.querySelectorAll('button');
+        for (var i = 0; i < bs.length; i++) if (bs[i].querySelector('img')) return true;
+        return false;
+      }
+    } catch (e) {}
+    return false;
+  }
+  var ycAutoWasReady = false;
+  setInterval(ycSelfTick, 5000);
+  setInterval(function () {
+    try {
+      if (ycSelfDone || ycSelfBusy) return;
+      if (ycSelfHasFlag()) return; // 本号已抓过：自动开页永久停用，只剩被动刷新
+      var fn = YC_SELF_AUTO[String(profilePlatformKey || '').toLowerCase()];
+      if (!fn) return;
+      var ready = ycSelfReady();
+      if (ready && !ycAutoWasReady) { ycAutoTries = 0; ycSelfDbg('ready-reset'); }
+      ycAutoWasReady = ready;
+      if (!ready) return;
+      if (ycAutoTries >= 6) return;
+      if (Date.now() - ycLastInputAt < 8000) return;
+      ycAutoTries++;
+      ycSelfDbg('try:' + String(profilePlatformKey || '') + '#' + ycAutoTries);
+      ycSelfBusy = true;
+      var ok = false;
+      try { ok = fn(); } catch (e) {}
+      if (!ok) { ycSelfBusy = false; ycAutoTries--; return; }
+      setTimeout(function () { ycSelfBusy = false; }, 6000);
+    } catch (e) { ycSelfBusy = false; }
+  }, 9000);
+
   // 暴露给宿主渲染层（webview.executeJavaScript 在页面主世界执行）。
   // 2026-11-01：开启上下文隔离后，window 上的赋值只存在于 preload 世界，
   // 宿主的 executeJavaScript 看不到，所以额外用 contextBridge 桥一份到主世界。

@@ -323,7 +323,19 @@ async function testKey(entry) {
     const res = await fetchTimeout(baseOf(entry) + '/models', {
       headers: { Authorization: 'Bearer ' + key },
     });
-    if (res.ok) return { ok: true, message: '连接成功，Key 有效' };
+    if (res.ok) {
+      // 3.8.1（S11）：顺带验所配模型在不在列表里——原来只验 Key，模型名写错也报
+      // 「测试通过」，实际调用时才 404。列表为空/拿不到时不拦（有些网关不给全量列表）。
+      try {
+        const data = await res.json().catch(() => null);
+        const ids = data && Array.isArray(data.data) ? data.data.map((m) => String((m && m.id) || '')) : [];
+        const want = modelOf(entry);
+        if (ids.length && want && ids.indexOf(want) < 0) {
+          return { ok: false, message: '模型不存在：' + want + '——这把 Key 的服务商没有这个模型，去 设置 → API Key 里改模型名' };
+        }
+      } catch (e) {}
+      return { ok: true, message: '连接成功，Key 有效' };
+    }
     if (res.status === 401) return { ok: false, message: 'Key 无效（401 未授权）' };
     return { ok: false, message: `${humanHttp(res.status, '')}` };
   } catch (e) {
@@ -365,11 +377,19 @@ async function chat(entry, messages, maxTokens = 500) {
     }
     if (entry.type === 'Gemini') {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+      // 3.8.1（S11）：content 可能是多模态数组（OpenAI 格式 parts），原来直接
+      // join 会把对象拼成 [object Object] 发出去；这里只提取文本段。
+      const msgText = (m) => {
+        const c = m && m.content;
+        if (typeof c === 'string') return c;
+        if (Array.isArray(c)) return c.map((p) => (p && p.type === 'text' && typeof p.text === 'string') ? p.text : '').filter(Boolean).join('\n');
+        return '';
+      };
       const res = await fetchTimeout(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: messages.map((m) => m.content).join('\n') }] }],
+          contents: [{ parts: [{ text: messages.map(msgText).join('\n') }] }],
           generationConfig: { maxOutputTokens: maxTokens },
         }),
       });
@@ -411,13 +431,16 @@ async function translate(entry, text, targetLang = '英语') {
     if (!key) return { ok: false, message: 'Key 为空' };
     return deeplTranslate(key, t, targetLang);
   }
+  // 3.8.1（S11）：max_tokens 原写死 800，长消息译文会被静默截断且仍返回 ok；
+  // 改为按输入长度放大（约 1.5 倍字符数 + 64 余量），上限 4000
+  const maxTokens = Math.min(4000, Math.max(800, Math.ceil(t.length * 1.5) + 64));
   const r = await chat(
     entry,
     [
       { role: 'system', content: `你是一个翻译引擎。把用户发来的文本翻译成${targetLang}，只输出译文，不要解释。` },
       { role: 'user', content: t },
     ],
-    800
+    maxTokens
   );
   return r;
 }
@@ -430,11 +453,14 @@ async function tts(entry, text, voice = 'alloy') {
     return { ok: false, message: `${entry.type} 不支持语音合成，请用 OpenAI / DeepSeek / 自定义类型` };
   }
   const key = String(entry.key || '').trim();
+  // 3.8.1（S11）：首跳模型用条目自带的（ttsModel 优先，其次条目 model）——原来写死
+  // tts-1，非 OpenAI 官方端点先吃一次 404 才落对话式兜底，多一趟往返且日志难读
+  const speechModel = String(entry.ttsModel || entry.model || '').trim() || 'tts-1';
   try {
     const res = await fetchTimeout(baseOf(entry) + '/audio/speech', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + key, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'tts-1', voice, input: t.slice(0, 2000) }),
+      body: JSON.stringify({ model: speechModel, voice, input: t.slice(0, 2000) }),
     }, 60000);
     if (!res.ok) {
       if (res.status === 401) return { ok: false, message: 'Key 无效（401 未授权）' };
@@ -490,10 +516,9 @@ async function transcribe(entry, audioBase64, mime, lang) {
     return { ok: false, message: `${entry.type} 不支持语音识别，请在 API Key 里加一个 OpenAI / 自定义 类型的 Key` };
   }
   const key = String(entry.key || '').trim();
-  // 模型名：优先 asrModel；入口里配的 model 本身就是 whisper/transcribe 系就直接用，否则回落 whisper-1
-  const model = String(
-    entry.asrModel || (/whisper|transcribe/i.test(String(entry.model || '')) ? entry.model : 'whisper-1')
-  ).trim();
+  // 模型名：优先 asrModel，否则用条目自带 model（3.8.1 S11：原来非 whisper 系
+  // 模型名一律回落 whisper-1 首跳试错，MiMo 类条目先吃一次 404 才走 input_audio 兜底）
+  const model = String(entry.asrModel || entry.model || 'whisper-1').trim();
   try {
     const buf = Buffer.from(b64, 'base64');
     if (!buf.length) return { ok: false, message: '音频解码失败' };

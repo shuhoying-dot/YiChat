@@ -1525,6 +1525,7 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 .sess-acc-card:hover {border-color:var(--vc-brand-100)!important;box-shadow:var(--vc-sh-md)!important}
 .sess-acc-avatar {width:40px!important;height:40px!important;border-radius:50%!important;
   border:1px solid var(--vc-line)!important}
+.sess-acc-avatar .sess-acc-avatar-img{width:100%!important;height:100%!important}
 .sess-acc-name {font-size:13px!important;font-weight:600!important;color:var(--vc-1)!important}
 .sess-acc-phone {font-size:11.5px!important;color:var(--vc-4)!important}
 .sess-acc-status {width:8px!important;height:8px!important;border-radius:50%!important;background:var(--vc-ok)!important;
@@ -1971,6 +1972,7 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 .yc3-hidden-lb { font-size: 12px; color: var(--wb-t3); }
 .yc3-hidden-chip { background: rgba(127, 127, 127, .08); border: 1px dashed rgba(127, 127, 127, .35); color: var(--wb-t2); border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
 /* —— AI 帮写抽屉 —— */
+#yc-ai-mask.yc-from-dock { right: 50px; }
 #yc-ai-mask { position: fixed; inset: 0; z-index: 99990; background: rgba(16, 24, 40, .25); font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif; }
 @keyframes yc-slide-in { from { transform: translateX(44px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 .yc-ai { position: absolute; top: 0; right: 0; bottom: 0; width: 382px; max-width: 92vw; background: #fff; box-shadow: -18px 0 44px rgba(16, 24, 40, .18); display: flex; flex-direction: column; animation: yc-slide-in .28s cubic-bezier(.22, .8, .3, 1) both; --wb-brand: #005dff; }
@@ -2155,3 +2157,291 @@ body.yc-side-narrow .sess-side>* {display:none!important}
 [data-theme="dark"] #yc-wb .yc3-greet { background: radial-gradient(520px 230px at 90% 30%, color-mix(in srgb, var(--wb-brand) 16%, transparent), transparent 70%), linear-gradient(120deg, color-mix(in srgb, var(--wb-brand) 10%, transparent), color-mix(in srgb, var(--wb-brand) 4%, transparent) 55%, transparent), var(--wb-panel); }
 /* 选中态单一口径：浅灰（与设置菜单一致），钉死防旧段回潮 */
 .settings-plat-row.active { background: #f0f0f0 !important; color: #262626 !important; box-shadow: none !important; }
+
+/* ================================================================
+   ===== 2026-11-22 v370 设计系统定版（3.7.0，《UI 设计说明 v1》落地）=====
+   本节为全站呈现的最终事实源：设计令牌（--yc-*）在此定义，工作台
+   --wb-* 变量整体映射到令牌；历史段与本节冲突的以本节为准。
+   原则：系统优先 / 状态优先 / 呈现诚实 / 红色只给真问题。
+   ================================================================ */
+:root {
+  --yc-bg: #F3F6FB; --yc-surface: #FFFFFF; --yc-surface-2: #F7F9FC; --yc-tint: #EEF3FF;
+  --yc-t1: #1D2735; --yc-t2: #5B6B82; --yc-t3: #98A2B3;
+  --yc-primary: #2F6BFF; --yc-primary-hover: #245FE6; --yc-on-primary: #FFFFFF;
+  --yc-success: #22B573; --yc-warning: #FA8C16; --yc-danger: #F04438; --yc-danger-tint: #FEF4F2;
+  --yc-border: #E5EAF1; --yc-divider: #EEF1F6;
+  --yc-shadow-card: 0 1px 2px rgba(29,39,53,.04), 0 10px 30px rgba(29,39,53,.05);
+  --yc-shadow-pop: 0 12px 32px rgba(29,39,53,.16);
+}
+[data-theme="dark"] {
+  --yc-bg: #131922; --yc-surface: #1C242F; --yc-surface-2: #232D3A; --yc-tint: #24334D;
+  --yc-t1: #E8EDF5; --yc-t2: #A7B3C4; --yc-t3: #6B7A8F;
+  --yc-border: #2C3747; --yc-divider: #26303E; --yc-danger-tint: #3A2320;
+}
+/* —— 工作台变量整体映射到令牌（--wb-brand 仍可被主题色内联覆盖）—— */
+#yc-wb {
+  --wb-radius: 16px; --wb-gap: 20px;
+  --wb-t1: var(--yc-t1); --wb-t2: var(--yc-t2); --wb-t3: var(--yc-t3);
+  --wb-card: var(--yc-surface); --wb-line: var(--yc-divider);
+  background-color: var(--yc-bg);
+}
+[data-theme="dark"] #yc-wb {
+  --wb-t1: var(--yc-t1); --wb-t2: var(--yc-t2); --wb-t3: var(--yc-t3);
+  --wb-card: var(--yc-surface); --wb-line: var(--yc-divider);
+}
+/* —— 页头：去渐变带，问候与统计按说明字阶 —— */
+#yc-wb .yc3-greet { background: transparent; padding: 4px 4px 0; border-radius: 0; }
+[data-theme="dark"] #yc-wb .yc3-greet { background: transparent; }
+#yc-wb .yc3-greet-t { font-size: 28px; font-weight: 700; line-height: 36px; color: var(--yc-t1); }
+#yc-wb .yc3-greet-sub { font-size: 12px; color: var(--yc-t3); margin-top: 2px; }
+#yc-wb .yc3-gstats { gap: 54px; }
+#yc-wb .yc3-gstat-v { font-size: 28px !important; font-weight: 600; line-height: 34px; color: var(--yc-t1) !important; }
+#yc-wb .yc3-gstat.zero .yc3-gstat-v { color: var(--yc-t1) !important; }
+#yc-wb .yc3-gstat-l { font-size: 12px; color: var(--yc-t3); }
+#yc-wb .yc3-search { background: var(--yc-surface); border: 1px solid var(--yc-border); color: var(--yc-t3); font-size: 13px; padding: 8px 14px; }
+#yc-wb .yc3-ai-btn { padding: 8px 16px; font-size: 13px; }
+/* —— 需处理区（配置阻断专区，与异常条分工）—— */
+#yc-wb .yc3-need-wrap { display: flex; flex-direction: column; gap: 12px; flex: none; }
+#yc-wb .yc3-need-item { display: flex; align-items: center; gap: 12px; background: var(--yc-danger-tint); border: 1px solid #F6D8D3; border-radius: 14px; padding: 10px 14px 10px 16px; }
+[data-theme="dark"] #yc-wb .yc3-need-item { border-color: var(--yc-border); }
+#yc-wb .yc3-need-ico { width: 26px; height: 26px; border-radius: 50%; background: var(--yc-danger); display: flex; align-items: center; justify-content: center; flex: none; }
+#yc-wb .yc3-need-tx { font-size: 14px; color: var(--yc-t2); line-height: 1.5; }
+#yc-wb .yc3-need-tx b { color: var(--yc-t1); font-weight: 600; }
+#yc-wb .yc3-need-btn { margin-left: auto; flex: none; height: 36px; padding: 0 18px; border: none; border-radius: 10px; background: var(--yc-primary); color: #fff; font-size: 13.5px; font-weight: 600; cursor: pointer; box-shadow: 0 6px 16px rgba(47,107,255,.28); font-family: inherit; }
+#yc-wb .yc3-need-btn:hover { background: var(--yc-primary-hover); }
+/* —— 异常条：浮层阴影与圆角令牌化（配色由 paint 按集合分级内联）—— */
+#yc-wb .yc3-alert { border-radius: 14px !important; box-shadow: var(--yc-shadow-pop) !important; }
+/* —— 快捷入口：整行第一屏，瓷砖按效果图（52 高、图标底 tint）—— */
+#yc-wb .yc2-sect b { font-size: 16px; font-weight: 600; color: var(--yc-t1); }
+#yc-wb .yc2-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; grid-auto-rows: 52px !important; gap: 16px !important; }
+#yc-wb .yc2-tile { padding: 0 18px !important; border-radius: 16px !important; background: var(--yc-surface) !important; border: 1px solid var(--yc-divider) !important; box-shadow: var(--yc-shadow-card) !important; }
+#yc-wb .yc2-tile::after { display: none; }
+#yc-wb .yc2-tile:hover { transform: translateY(-2px); border-color: var(--yc-border) !important; box-shadow: var(--yc-shadow-card) !important; }
+#yc-wb .yc2-tile-ico { width: 34px !important; height: 34px !important; border-radius: 12px !important; background: var(--yc-tint) !important; color: var(--yc-primary) !important; }
+#yc-wb .yc2-tile[data-k="reset"] .yc2-tile-ico { background: var(--yc-danger-tint) !important; color: var(--yc-danger) !important; }
+#yc-wb .yc2-tile-ico svg { width: 20px !important; height: 20px !important; }
+#yc-wb .yc2-tile-tx b { font-size: 15px !important; font-weight: 600; color: var(--yc-t1) !important; }
+[data-theme="dark"] #yc-wb .yc2-tile { background: var(--yc-surface) !important; border-color: var(--yc-divider) !important; color: var(--yc-t1) !important; }
+[data-theme="dark"] #yc-wb .yc2-tile-tx b { color: var(--yc-t1) !important; }
+/* —— 栅格比例：左 2.05 / 右 1（对效果图），右栏不再定宽 302 —— */
+#yc-wb .yc3-cols { gap: 20px; }
+#yc-wb .yc3-left { flex: 2.05; gap: 20px; }
+#yc-wb .yc3-right { flex: 1; width: auto; gap: 20px; }
+/* —— 通用卡：圆角 16 / 令牌边 / 定版阴影 / 内边距 18×20 —— */
+#yc-wb .yc3-card { background: var(--yc-surface); border: 1px solid var(--yc-border); border-radius: 16px; box-shadow: var(--yc-shadow-card); padding: 18px 20px; }
+#yc-wb .yc3-card-h { margin-bottom: 10px; }
+#yc-wb .yc3-card-h b { font-size: 16px; font-weight: 600; color: var(--yc-t1); }
+#yc-wb .yc3-card-s { font-size: 12px; color: var(--yc-t3); }
+/* —— 未读卡：与效果图同高 252，空/有数同框不跳版 —— */
+#yc-wb .yc3-unread-card { height: 252px; flex: none; }
+#yc-wb .yc-un-row { height: 60px; padding: 0 8px; gap: 13px; border-bottom: 1px solid var(--yc-divider); border-radius: 0; }
+#yc-wb .yc-un-name { font-size: 14px !important; font-weight: 600 !important; color: var(--yc-t1) !important; }
+#yc-wb .yc-un-row:hover .yc-un-name { color: var(--yc-primary) !important; }
+#yc-wb .yc-un-plat { font-size: 11px; color: var(--yc-t3); background: var(--yc-surface-2); border-radius: 5px; padding: 1px 6px; }
+#yc-wb .yc-un-n { margin-left: auto; font-style: normal; font-size: 11.5px !important; font-weight: 600 !important; color: #fff !important; background: var(--yc-danger) !important; min-width: 19px; height: 19px; line-height: 19px; text-align: center; border-radius: 999px !important; padding: 0 6px !important; box-sizing: border-box; }
+#yc-wb .yc-un-tail { font-size: 12.5px; color: var(--yc-primary); padding: 10px 8px 0; cursor: pointer; }
+[data-theme="dark"] #yc-wb .yc-un-name { color: var(--yc-t1) !important; }
+[data-theme="dark"] #yc-wb .yc-un-n { background: var(--yc-danger) !important; color: #fff !important; }
+/* —— 统一空状态模板（全软件唯一，原型＝会话页「未打开会话」）—— */
+.yc7-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.yc7-empty-ico { width: 44px; height: 44px; border-radius: 50%; background: var(--yc-tint); color: var(--yc-t3); display: flex; align-items: center; justify-content: center; flex: none; }
+.yc7-empty-ico svg { width: 22px; height: 22px; }
+.yc7-empty-ico.ok { background: #E5F7EF; color: var(--yc-success); }
+[data-theme="dark"] .yc7-empty-ico.ok { background: rgba(34,181,115,.16); }
+.yc7-empty-t { font-size: 15px; font-weight: 600; color: var(--yc-t1); margin-top: 12px; }
+.yc7-empty-d { font-size: 13px; color: var(--yc-t3); margin-top: 5px; }
+.yc7-empty-btn { margin-top: 14px; height: 34px; padding: 0 16px; border: 1px solid var(--yc-border); border-radius: 10px; background: var(--yc-surface); color: var(--yc-t1); font-size: 13.5px; font-weight: 500; cursor: pointer; font-family: inherit; }
+.yc7-empty-btn:hover { border-color: var(--yc-primary); color: var(--yc-primary); }
+#yc-wb .yc-un-empty { flex-direction: column !important; }
+#yc-wb .yc3-chart-empty::before { display: none; }
+/* —— 平台状态：6 行全露、行高 46、卡内不滚动 —— */
+#yc-wb .yc3-plats { max-height: 276px; overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; }
+#yc-wb .yc3-prow { height: 46px; padding: 0 4px; border-radius: 10px; }
+#yc-wb .yc3-pico2 { width: 28px; height: 28px; border-radius: 50%; }
+#yc-wb .yc3-pico2 svg { width: 16px; height: 16px; }
+#yc-wb .yc3-pname { font-size: 14px; color: var(--yc-t1); }
+#yc-wb .yc3-pstat { font-size: 12px; color: var(--yc-t3); }
+#yc-wb .yc3-sdot { width: 8px; height: 8px; background: #C4CDD9; }
+#yc-wb .yc3-sdot.on { background: var(--yc-success); }
+#yc-wb .yc3-pdiv { display: none; }
+/* —— 图表：柱与数值令牌化（空态走模板，见上）—— */
+#yc-wb .yc3-bar { width: 56%; max-width: 56px; background: linear-gradient(180deg, #4C8DFF, var(--yc-primary)); }
+#yc-wb .yc3-bar.today { background: linear-gradient(180deg, #4C8DFF, var(--yc-primary)); }
+#yc-wb .yc3-bar-v { font-size: 12px; color: var(--yc-t2); }
+#yc-wb .yc3-bar-d { font-size: 12px; color: var(--yc-t3); }
+#yc-wb .yc3-chart-tot { font-size: 12px; color: var(--yc-t3); }
+#yc-wb .yc3-chart-tot b { color: var(--yc-t1); font-size: 12px; font-weight: 600; }
+/* —— Key / 用量行：分隔线行式，数字单独成级 —— */
+#yc-wb .yc3-kv { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 34px; padding: 2px 0; font-size: 14px; border-bottom: 1px solid var(--yc-divider); }
+#yc-wb .yc3-usage-card .yc3-kv { min-height: 30px; }
+#yc-wb .yc3-keys .yc3-kv:last-child, #yc-wb .yc3-usage .yc3-kv:last-child { border-bottom: none; }
+#yc-wb .yc3-kv-l { color: var(--yc-t1); font-size: 14px; }
+#yc-wb .yc3-usage-card .yc3-kv-l { color: var(--yc-t2); font-size: 13.5px; }
+#yc-wb .yc3-kv-v { font-size: 13.5px; color: var(--yc-t1); font-weight: 500; text-align: right; }
+#yc-wb .yc3-kv-v.none { color: var(--yc-danger); font-weight: 600; }
+#yc-wb .yc3-usage-card .yc3-kv-v { color: var(--yc-t2); font-weight: 400; }
+#yc-wb .yc3-kv-n { font-size: 16px; font-weight: 600; color: var(--yc-t1); }
+#yc-wb .yc3-keys-foot { display: flex; align-items: center; border-top: 1px solid var(--yc-divider); padding-top: 10px; margin-top: 8px; }
+#yc-wb .yc3-keys-note { font-size: 12.5px; color: var(--yc-t3); }
+#yc-wb .yc3-keys-btn { margin-left: auto; height: 30px; padding: 0 14px; border: 1px solid var(--yc-border); border-radius: 10px; background: var(--yc-surface); color: var(--yc-t1); font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; }
+#yc-wb .yc3-keys-btn:hover { border-color: var(--yc-primary); color: var(--yc-primary); }
+/* —— 页脚 —— */
+#yc-wb .yc2-foot { font-size: 12px; color: var(--yc-t3); }
+/* —— 命令面板 / AI 抽屉品牌色对齐令牌 —— */
+.yc-pal { --wb-brand: #2F6BFF; }
+.yc-ai { --wb-brand: #2F6BFF; }
+/* ================================================================
+   会话页覆写对齐（编译 DOM 贴合）：空状态 / 账号卡 / 置顶钮 / 提示条
+   ================================================================ */
+.sess-main-empty-title { font-size: 15px; font-weight: 600; color: var(--yc-t1); }
+.sess-main-empty-hint { font-size: 13px; color: var(--yc-t3); }
+[data-theme="dark"] .sess-main-empty-title { color: var(--yc-t1); }
+[data-theme="dark"] .sess-main-empty-hint { color: var(--yc-t3); }
+#yc-empty-hint { background: var(--yc-surface); border: 1px solid var(--yc-border); border-radius: 12px; box-shadow: var(--yc-shadow-pop); color: var(--yc-t2); font-size: 13px; }
+.yc-empty-hint-x { background: var(--yc-tint); color: var(--yc-primary); font-weight: 600; }
+[data-theme="dark"] #yc-empty-hint { background: var(--yc-surface); border-color: var(--yc-border); color: var(--yc-t2); }
+.sess-acc-card { border-radius: 12px; }
+.yc-pintop { border: 1px solid var(--yc-border) !important; background: var(--yc-surface) !important; color: var(--yc-t1) !important; font-weight: 500; box-shadow: var(--yc-shadow-card) !important; border-radius: 10px !important; }
+.yc-pintop:hover { border-color: var(--yc-primary) !important; color: var(--yc-primary) !important; }
+[data-theme="dark"] .yc-pintop { background: var(--yc-surface) !important; border-color: var(--yc-border) !important; color: var(--yc-t1) !important; }
+/* ================================================================
+   设置页覆写对齐：面板圆角 / 表单控件 / 按钮 / 开关 / 选中态令牌化
+   ================================================================ */
+.settings .set-section-bar { border-radius: 16px 16px 0 0 !important; }
+.settings .set-form { border-radius: 0 0 16px 16px !important; }
+.settings .ant-btn { border-radius: 10px !important; }
+.settings .ant-btn-primary { background: var(--yc-primary) !important; border-color: var(--yc-primary) !important; }
+.settings .ant-btn-primary:hover { background: var(--yc-primary-hover) !important; border-color: var(--yc-primary-hover) !important; }
+.settings .ant-input, .settings .ant-input-affix-wrapper, .settings .ant-select-selector, .settings textarea.ant-input { border-radius: 10px !important; border-color: var(--yc-border) !important; }
+.settings .ant-input:focus, .settings .ant-input-affix-wrapper-focused, .settings .ant-select-focused .ant-select-selector { border-color: var(--yc-primary) !important; box-shadow: 0 0 0 3px rgba(47,107,255,.16) !important; }
+.settings .ant-switch-checked { background: var(--yc-primary) !important; }
+.settings-menu-item.active { background: var(--yc-surface-2) !important; color: var(--yc-t1) !important; }
+.settings-plat-row.active { background: var(--yc-surface-2) !important; color: var(--yc-t1) !important; }
+[data-theme="dark"] .settings-menu-item.active { background: var(--yc-tint) !important; color: var(--yc-primary) !important; box-shadow: inset 3px 0 0 var(--yc-primary); }
+[data-theme="dark"] .settings-plat-row.active { background: var(--yc-tint) !important; color: var(--yc-primary) !important; box-shadow: inset 3px 0 0 var(--yc-primary); }
+/* 3.7.0 补：图表卡快捷键条贴底（空态隐藏柱图区后不许上浮）+ 负边距随新卡内边距对齐 */
+#yc-wb .yc3-tips { margin: 12px -20px -18px; margin-top: auto; padding: 11px 20px 13px; }
+/* ================================================================
+   3.7.1 图表卡空状态溢出修复（真机 2026-11-22 截图实证）
+   根因：空模板是绝对定位覆盖层——<900px 分支定高 196px＋top:46px，
+   而空态时柱图区隐藏、卡片塌至 min-height 200px，模板需 242px，
+   底部 44px（描述＋按钮）溢出卡界：描述压住页脚快捷键行过印、按钮半悬卡外；
+   ≥900px 分支虽拉伸定位，但居中区把流内页脚也算了进去，同类风险在。
+   修法：模板改回流内 flex 子元素（绘图区的同位替代者），恒被约束在
+   标题行与页脚之间，任何窗口尺寸下零重叠、零溢出；min-height 190
+   与柱图区定高对齐，空/有数据两态卡高一致不跳版。
+   ================================================================ */
+#yc-wb .yc3-chart-empty { position: static; flex: 1 1 auto; height: auto; min-height: 190px; top: auto; bottom: auto; left: auto; right: auto; }
+
+/* ================================================================
+   3.7.2 会话页三帧＋设置五页 A 类落地（《UI 评审汇总 20261122》）
+   呈现层覆写：类名前缀 yc372-（已 grep 防撞）；令牌一律走 --yc-*。
+   动态部分（空状态注入/置灰联动/分组重排/搜索过滤）在 tweak 的
+   yc372Tick 里，本节只管呈现。
+   ================================================================ */
+/* —— 条2：建会话入口唯一化 —— */
+.sess-side .sess-create, .sess-side .sess-empty-hint { display: none !important; }
+.sess-side .sess-empty .empty-illus { display: none !important; }
+.yc372-no-sess { text-align: center; font-size: 13px; color: var(--yc-t3); padding: 30px 0 8px; }
+/* —— 条1：会话页空状态分场景接管 —— */
+.sess-main-empty.yc372-empty-on > .empty-illus,
+.sess-main-empty.yc372-empty-on > .sess-main-empty-title,
+.sess-main-empty.yc372-empty-on > .sess-main-empty-hint,
+.sess-main-empty.yc372-empty-on > .yc-empty-hint { display: none !important; }
+.sess-main-empty.yc372-empty-on { display: flex !important; align-items: center; justify-content: center; }
+.yc7-empty-btn.yc372-primary-btn { background: var(--yc-primary); color: var(--yc-on-primary); border-color: var(--yc-primary); height: 40px; padding: 0 22px; font-size: 14px; font-weight: 600; border-radius: 10px; box-shadow: 0 6px 16px rgba(47,107,255,.28); }
+.yc7-empty-btn.yc372-primary-btn:hover { background: var(--yc-primary-hover); color: var(--yc-on-primary); }
+/* —— 条3：右栏工具按会话状态置灰 —— */
+.sess-tool.yc372-tool-off, .yc-dock-btn.yc372-tool-off { opacity: .42 !important; filter: grayscale(.65); pointer-events: none !important; }
+/* —— 条4：置顶钮降级——原整幅钮隐藏，栏头小图标钮接管 —— */
+#yc-rail-toggle { display: none !important; }
+.yc372-pin-btn { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--yc-t2); cursor: pointer; flex: none; user-select: none; }
+.yc372-pin-btn:hover { background: var(--yc-surface-2); color: var(--yc-primary); }
+.yc372-pin-btn svg { width: 16px; height: 16px; }
+/* —— 条5：折叠（窄条）态——去截断文字、账号改紧凑方形钮 —— */
+#yc-narrow-col .yc-narrow-name { display: none !important; }
+#yc-narrow-col .yc-narrow-head { justify-content: center !important; }
+#yc-narrow-col .yc-narrow-card { width: 48px !important; height: 48px; padding: 0 !important; gap: 0 !important; justify-content: center; border-radius: 12px !important; }
+#yc-narrow-col .yc-narrow-card span { display: none !important; }
+/* —— 条6：置顶态——横条收紧、chip 统一、点色对齐、动作钮成组 —— */
+#yc-mini-bar { padding: 6px 120px 6px 14px !important; gap: 10px !important; }
+#yc-mini-bar .yc-left { flex-direction: row !important; align-items: center !important; gap: 8px !important; }
+#yc-mini-bar .yc-mini-add { height: 32px !important; padding: 0 14px !important; border-radius: 8px !important; font-size: 13px !important; font-weight: 600; }
+#yc-mini-bar .yc-chips { min-height: 0 !important; margin-left: 6px !important; }
+#yc-mini-bar .yc-mini-chip { flex-direction: row !important; align-items: center !important; justify-content: flex-start !important; gap: 8px !important; height: 44px; padding: 0 12px !important; border-radius: 12px !important; min-width: 0 !important; }
+#yc-mini-bar .yc-mini-chip img, #yc-mini-bar .yc-mini-chip .yc-mini-ph { width: 28px !important; height: 28px !important; }
+#yc-mini-bar .yc-mini-chip span { font-size: 13px !important; text-align: left !important; }
+#yc-mini-bar .yc-mini-chip .yc-dot { position: static !important; flex: none; border: none !important; width: 8px !important; height: 8px !important; }
+#yc-mini-bar .yc-mini-chip .yc-dot-on { background: var(--yc-success) !important; }
+#yc-mini-bar .yc-mini-chip .yc-dot-off { background: #C4CDD9 !important; }
+#yc-mini-bar .yc-actions { flex-direction: row !important; align-items: center !important; top: 50% !important; transform: translateY(-50%); background: var(--yc-surface-2); border: 1px solid var(--yc-border); border-radius: 10px; padding: 3px; gap: 2px !important; }
+#yc-mini-bar .yc-top-btn { border: none !important; background: transparent !important; border-radius: 8px !important; height: 26px !important; }
+#yc-mini-bar .yc-top-btn:hover { background: var(--yc-surface); }
+/* —— 条7：账号卡备注行防裁切（防御性） —— */
+.sess-acc-card { overflow: visible !important; }
+.sess-acc-list { padding-bottom: 6px; }
+.sess-acc-card .yc-acc-note { flex: none; }
+/* —— 设置页共通 —— */
+.yc372-hidden { display: none !important; }
+/* —— 条9：平台设置 —— */
+.yc372-plat-search { width: 240px; height: 34px; border: 1px solid var(--yc-border); border-radius: 9px; background: var(--yc-surface); color: var(--yc-t1); font-size: 13.5px; padding: 0 12px; outline: none; font-family: inherit; }
+.yc372-plat-search:focus { border-color: var(--yc-primary); box-shadow: 0 0 0 3px var(--yc-tint); }
+.yc372-plat-tools { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.plat-grid .yc372-plat-group-h { grid-column: 1 / -1; font-size: 13px; font-weight: 600; color: var(--yc-t2); padding: 8px 2px 0; }
+.plat-card .yc372-grip { width: 14px; align-self: stretch; flex: none; cursor: grab; opacity: .45; background-image: radial-gradient(circle, var(--yc-t3) 1.2px, transparent 1.4px); background-size: 6px 6px; background-position: center; border-radius: 3px; margin-right: 2px; }
+.yc372-adv-card { border: 1px solid var(--yc-border); border-radius: 14px; padding: 2px 16px; margin-top: 16px; background: var(--yc-surface); }
+.yc372-adv-card .set-switch-row { align-items: center !important; padding: 11px 0; margin-bottom: 0 !important; border-bottom: 1px solid var(--yc-divider); }
+.yc372-adv-card .set-switch-row:last-child { border-bottom: none; }
+.yc372-adv-desc { display: block; font-size: 12.5px; color: var(--yc-t3); margin-top: 2px; }
+.yc372-diag-card { border: 1px solid var(--yc-border); border-radius: 14px; padding: 14px 16px; margin-top: 16px; background: var(--yc-surface); }
+.yc372-diag-card .set-sub-title { margin-top: 0 !important; }
+.yc372-diag-desc { font-size: 12.5px; color: var(--yc-t3); margin: 2px 0 10px; }
+/* —— 条10：显示设置 —— */
+.yc372-disp-single .settings-plats { display: none !important; }
+.yc372-color-lab { font-size: 12.5px; color: var(--yc-t2); flex: none; }
+.yc372-group-card { border: 1px solid var(--yc-border); border-radius: 14px; padding: 12px 16px; margin-top: 18px; background: var(--yc-surface); }
+.yc372-group-card .set-sub-title { margin-top: 0 !important; }
+.yc372-group-card .set-switch-row { margin-bottom: 10px !important; }
+.yc372-group-card .set-switch-row:last-child { margin-bottom: 0 !important; }
+/* —— 条11：性能监控 —— */
+.yc372-perf-note { font-size: 12.5px; color: var(--yc-t3); margin-top: 8px; }
+.yc372-perf-split { font-size: 12.5px; color: var(--yc-t2); line-height: 1.75; margin-top: 8px; }
+.settings-main .yc-snap-card { overflow: hidden !important; }
+.settings-main .yc-snap-card .perf-metric-sub { white-space: normal !important; line-height: 1.65; }
+/* —— 条12：API Key 管理 —— */
+.yc372-key-empty { padding: 42px 0 38px; }
+.yc372-btn-off { opacity: .5 !important; pointer-events: none !important; filter: grayscale(.4); }
+.yc372-tts-note { font-size: 12.5px; color: var(--yc-t3); align-self: center; }
+/* —— 条13：翻译设置 —— */
+.yc372-seg { display: inline-flex !important; background: var(--yc-surface-2); border: 1px solid var(--yc-border); border-radius: 10px; padding: 3px; gap: 2px; align-items: center; }
+.yc372-seg > button { border: none !important; background: transparent !important; color: var(--yc-t2) !important; border-radius: 8px !important; height: 28px !important; padding: 0 14px !important; font-size: 13.5px; cursor: pointer; box-shadow: none !important; width: auto !important; }
+.yc372-seg > button.yc372-seg-on { background: var(--yc-surface) !important; color: var(--yc-t1) !important; font-weight: 600; box-shadow: 0 1px 4px rgba(29,39,53,.14) !important; }
+.yc372-global-banner { margin-top: 10px; background: var(--yc-tint); color: var(--yc-primary); font-size: 13px; border-radius: 10px; padding: 8px 12px; }
+.settings .set-section-bar { background: var(--yc-surface) !important; border-left-color: var(--yc-border) !important; }
+.yc372-bolt { display: inline-flex; width: 16px; height: 16px; color: var(--yc-primary); margin-right: 5px; vertical-align: -3px; }
+.yc372-bolt svg { width: 16px; height: 16px; }
+.yc372-swap { position: absolute; left: 50%; bottom: 16px; transform: translate(-50%, 50%); z-index: 5; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--yc-border); background: var(--yc-surface); color: var(--yc-t2); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(29,39,53,.10); }
+.yc372-swap:hover { color: var(--yc-primary); border-color: var(--yc-primary); }
+.yc372-swap svg { width: 15px; height: 15px; }
+.set-two-col.yc372-has-swap { position: relative; }
+/* —— 条14：翻译配置面板独立设置关时字段禁用 —— */
+.slide-panel .yc372-f-off { opacity: .45 !important; pointer-events: none !important; }
+/* —— 条15：AI 帮写生成钮随输入 —— */
+.yc-ai-gen.yc372-gen-off { opacity: .5 !important; pointer-events: none !important; filter: grayscale(.4); }
+/* —— 条16：用户画像空状态接管 —— */
+.mgmt-empty.yc372-prof-on .mgmt-empty-title { display: none !important; }
+.yc372-prof-empty { padding: 16px 0 6px; }
+/* —— 条17：话术库 —— */
+.yc372-phrase-search { width: 100%; height: 32px; border: 1px solid var(--yc-border); border-radius: 9px; background: var(--yc-surface); color: var(--yc-t1); font-size: 13px; padding: 0 10px; outline: none; font-family: inherit; margin-bottom: 8px; box-sizing: border-box; }
+.yc372-phrase-search:focus { border-color: var(--yc-primary); box-shadow: 0 0 0 3px var(--yc-tint); }
+.yc372-phrases-baretxt { font-size: 0 !important; color: transparent !important; }
+.yc372-phrases-baretxt .yc7-empty-t, .yc372-phrases-baretxt .yc7-empty-d { color: var(--yc-t1); }
+.yc372-phrases-baretxt .yc7-empty-d { color: var(--yc-t3); }
+
+/* 3.8.9：平台验证徽标 + 数据备份卡 */
+.yc3-ver{display:inline-block;font-size:10px;line-height:1.5;padding:0 5px;border-radius:99px;margin-right:6px;vertical-align:1px;white-space:nowrap}
+.yc3-ver.ok{background:rgba(34,197,94,.14);color:#16a34a}
+.yc3-ver.no{background:rgba(148,163,184,.16);color:#8494a7}
+.yc3-backup-note{font-size:12px;line-height:1.55;color:#8494a7;padding:2px 0 8px}
+.yc3-backup-row{display:flex;gap:8px}
+.yc3-backup-status{font-size:12px;line-height:1.5;padding-top:8px;min-height:14px}

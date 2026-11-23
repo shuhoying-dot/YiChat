@@ -79,8 +79,13 @@ contextBridge.exposeInMainWorld('yichat', {
   logMessage: (msg) => { try { ipcRenderer.send('yichat:ui-log', String(msg || '')); } catch (e) {} },
   // 页面结构快照落盘（2026-11-21 3.6.10）：payload {platform, data}，主进程写 userData/snapshots/
   saveSnapshot: (payload) => ipcRenderer.invoke('yichat:save-snapshot', payload || {}),
+  // 配置备份导出/恢复（2026-11-23，3.8.9）：主进程弹对话框读写备份文件
+  exportBackup: (json) => ipcRenderer.invoke('yichat:export-backup', { json: String(json || '') }),
+  importBackup: () => ipcRenderer.invoke('yichat:import-backup'),
   // 今日翻译统计（2026-10-31）：主页「今日概览」用，只读本机计数
   getDailyStats: () => ipcRenderer.invoke('yichat:daily-stats'),
+  // 性能监控真实指标（2026-11-22，3.8.1）：主进程 app.getAppMetrics 聚合，性能页每 2 秒拉一次
+  getPerfMetrics: () => ipcRenderer.invoke('yichat:perf-metrics'),
   // 弹窗登录接力（2026-11-21）：主进程开继承指定账号分区的登录窗
   openPopup: (partition, url) => ipcRenderer.invoke('yichat:open-popup', String(partition || ''), String(url || '')),
   // 翻译节点测速（2026-10-31）：主页「翻译节点」卡片的「重测」

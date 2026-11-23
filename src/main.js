@@ -143,12 +143,14 @@ ipcMain.on('yichat:vault-key', (event) => {
   catch (e) { event.returnValue = { key: '', backend: 'denied', message: String(e && e.message || e) }; }
 });
 // 用户 2026-10-16 要求：退出确认倒数完真正退出应用（不只是退回登录页）
-ipcMain.handle('yichat:quit-app', () => { app.quit(); });
+// 3.8.1（S6）：补来源校验——审计点名时它与 fill/capture 等通道一样裸奔
+ipcMain.handle('yichat:quit-app', (event) => { assertTrusted(event, 'yichat:quit-app'); app.quit(); });
 
 // 弹窗登录接力（2026-11-21）：访客页的 window.open 被 overlay 拦下后走这里，
 // 开一个继承该账号 session 分区的真窗口完成 OAuth 登录；登录态落回账号分区。
 ipcMain.handle('yichat:open-popup', (event, partition, url) => {
   try {
+    assertTrusted(event, 'yichat:open-popup'); // 3.8.1（S6）
     const u = String(url || '');
     if (!/^https?:\/\//i.test(u)) return { ok: false };
     const opts = {
@@ -280,6 +282,16 @@ ipcMain.handle('yichat:daily-stats', () => {
       const cell = s.days[dstr] || { ok: 0 };
       history.push({ d: dstr, ok: cell.ok || 0 });
     }
+    // 3.6.12：把「测速失败/不通」与「延迟数值」在数据源头分开——原来只有一个
+    // avgMs：无样本 -1、损坏数据甚至能算出负数，标题栏与异常条各写各的（同一屏
+    // 一个 -5747ms 一个 5747 ms）。现在：avgMs 只承载有效正数（无有效值恒 -1，
+    // 绝不为负）；nodeState 单独表达状态：ok（有有效延迟）/ down（今日请求全失败
+    // ≥3 次，或延迟样本损坏算出非正数）/ nodata（今日还没有任何翻译尝试）。
+    let avgMs = s.msCnt ? Math.round(s.msSum / s.msCnt) : -1;
+    let nodeState = 'nodata';
+    if (s.msCnt && avgMs <= 0) { nodeState = 'down'; avgMs = -1; }
+    else if (avgMs > 0) nodeState = 'ok';
+    else if (ok === 0 && fail >= 3) nodeState = 'down';
     return {
       date: s.date,
       ok,
@@ -287,13 +299,78 @@ ipcMain.handle('yichat:daily-stats', () => {
       total,
       rate: total ? Math.round((ok * 100) / total) : 0,
       platforms: Object.keys(s.platforms || {}).length,
-      avgMs: (s.msCnt ? Math.round(s.msSum / s.msCnt) : -1),
-      lastMs: (s.lastMs || -1),
+      avgMs,
+      nodeState,
+      lastMs: (s.lastMs > 0 ? s.lastMs : -1),
       history,
     };
   } catch (e) {
     return { date: todayStr(), ok: 0, fail: 0, total: 0, rate: 0, platforms: 0, history: [] };
   }
+});
+
+// ---- 性能指标（2026-11-22，3.8.1 / 评审 #21）----
+// 性能监控页原来整页是写死字面量（86 分、22%、652.66MB、告警日期全是假数，
+// 渲染层没有任何计算逻辑）。这里用 app.getAppMetrics() 给真实数：软件全部进程的
+// CPU/工作集内存、全部 webview 访客页进程的内存合计（＝账号合计）、整机内存
+// （process.getSystemMemoryInfo）、整机 CPU（os.cpus 前后采样差值）、运行时长。
+// 每个数都溯源到真实接口；取不到的字段不下发，渲染层显示「—」，绝不编造。
+let __perfPrevCpus = null;
+function osCpuPctSample() {
+  try {
+    const cpus = require('os').cpus();
+    let idle = 0, total = 0;
+    for (const c of cpus) {
+      for (const k in c.times) total += c.times[k];
+      idle += c.times.idle;
+    }
+    const prev = __perfPrevCpus;
+    __perfPrevCpus = { idle, total };
+    if (!prev || total <= prev.total) return null; // 首样无差值，下一轮才有
+    const pct = (1 - (idle - prev.idle) / (total - prev.total)) * 100;
+    if (!(pct >= 0)) return null;
+    return Math.round(Math.min(100, pct) * 10) / 10;
+  } catch (e) { return null; }
+}
+ipcMain.handle('yichat:perf-metrics', (event) => {
+  assertTrusted(event, 'yichat:perf-metrics');
+  try {
+    const metrics = app.getAppMetrics() || [];
+    let cpu = 0, memKB = 0;
+    const byPid = {};
+    for (const m of metrics) {
+      const c = m && m.cpu && typeof m.cpu.percentCPUUsage === 'number' ? m.cpu.percentCPUUsage : 0;
+      const w = m && m.memory && typeof m.memory.workingSetSize === 'number' ? m.memory.workingSetSize : 0;
+      cpu += c; memKB += w;
+      if (m && m.pid) byPid[m.pid] = w;
+    }
+    // 账号合计：当前所有 webview 访客页进程的工作集之和（按 OS pid 对回指标表）
+    let guestKB = 0, guestCount = 0;
+    try {
+      for (const wc of webContents.getAllWebContents()) {
+        try {
+          if (wc.getType() === 'webview' && !wc.isDestroyed()) {
+            const pid = wc.getOSProcessId();
+            if (pid && byPid[pid] != null) { guestKB += byPid[pid]; guestCount++; }
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+    let osTotalKB = 0, osFreeKB = 0;
+    try { const sm = process.getSystemMemoryInfo(); osTotalKB = sm.total || 0; osFreeKB = sm.free || 0; } catch (e) {}
+    return {
+      ok: true,
+      ts: Date.now(),
+      appCpuPct: Math.round(cpu * 10) / 10,
+      appMemMB: Math.round(memKB / 1024),
+      guestMemMB: Math.round(guestKB / 1024),
+      guestCount,
+      osCpuPct: osCpuPctSample(),
+      osTotalMB: osTotalKB ? Math.round(osTotalKB / 1024) : 0,
+      osFreeMB: osFreeKB ? Math.round(osFreeKB / 1024) : 0,
+      uptimeSec: Math.round(process.uptime()),
+    };
+  } catch (e) { return { ok: false }; }
 });
 
 // ---- 页面结构快照落盘（2026-11-21，3.6.10）----
@@ -313,9 +390,42 @@ ipcMain.handle('yichat:save-snapshot', (event, payload) => {
     const d = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     const ts = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
-    const name = plat + '-' + ts + '.json';
+    let name = plat + '-' + ts + '.json';
+    for (let i = 2; fs.existsSync(path.join(dir, name)); i++) name = plat + '-' + ts + '-' + i + '.json';
     fs.writeFileSync(path.join(dir, name), JSON.stringify(data, null, 1), 'utf8');
     return { ok: true, name };
+  } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
+});
+
+// ---- 配置备份导出/恢复（2026-11-23，3.8.9）----
+// 渲染层把全部配置（localStorage 的明文视图，api-keys 经 vault shim 已解密）拼成 JSON，
+// 这里只负责弹保存/打开对话框并读写文件；恢复时把文件内容交回渲染层校验后写回。
+ipcMain.handle('yichat:export-backup', async (event, payload) => {
+  try {
+    assertTrusted(event, 'yichat:export-backup');
+    const json = String((payload && payload.json) || '');
+    if (!json) return { ok: false, message: '备份内容为空' };
+    const { dialog } = require('electron');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const def = 'yichat-backup-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.json';
+    const r = await dialog.showSaveDialog(win, { title: '导出 YiChat 配置备份', defaultPath: def, filters: [{ name: 'YiChat 备份', extensions: ['json'] }] });
+    if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+    require('fs').writeFileSync(r.filePath, json, 'utf8');
+    return { ok: true, name: require('path').basename(r.filePath) };
+  } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
+});
+ipcMain.handle('yichat:import-backup', async (event) => {
+  try {
+    assertTrusted(event, 'yichat:import-backup');
+    const { dialog } = require('electron');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const r = await dialog.showOpenDialog(win, { title: '选择 YiChat 配置备份', properties: ['openFile'], filters: [{ name: 'YiChat 备份', extensions: ['json'] }] });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true };
+    const text = require('fs').readFileSync(r.filePaths[0], 'utf8');
+    if (text.length > 16 * 1024 * 1024) return { ok: false, message: '文件过大，不是备份文件' };
+    return { ok: true, text };
   } catch (e) { return { ok: false, message: String((e && e.message) || e) }; }
 });
 
@@ -643,6 +753,7 @@ ipcMain.handle('yichat:hook-enter', async (event, wcId, cfg) => {
 // 话术一键发送：把话术文本填入访客页输入框，再走回车翻译流程（按该会话配置翻译并发送）
 ipcMain.handle('yichat:fill-and-enter', async (event, wcId, text) => {
   try {
+    assertTrusted(event, 'yichat:fill-and-enter'); // 3.8.1（S6）
     const { webContents } = require('electron');
     const id = Number(wcId);
     const wc = id ? webContents.fromId(id) : null;
@@ -667,6 +778,7 @@ ipcMain.handle('yichat:fill-and-enter', async (event, wcId, text) => {
 // 用户接着手打或发送时会被判定为空/错位。
 ipcMain.handle('yichat:fill-text', async (event, wcId, text) => {
   try {
+    assertTrusted(event, 'yichat:fill-text'); // 3.8.1（S6）
     const id = Number(wcId);
     const wc = id ? webContents.fromId(id) : null;
     if (!wc || wc.isDestroyed()) return { ok: false, message: '没有可用的平台页' };
@@ -681,6 +793,7 @@ ipcMain.handle('yichat:fill-text', async (event, wcId, text) => {
 // 截图当前平台页 → 直接进系统剪贴板（发给同事看聊天记录最常用）
 ipcMain.handle('yichat:capture-page', async (event, wcId) => {
   try {
+    assertTrusted(event, 'yichat:capture-page'); // 3.8.1（S6）
     const electron = require('electron');
     const clipboard = electron.clipboard;
     const id = Number(wcId);
@@ -725,9 +838,11 @@ ipcMain.handle('yichat:notify', (event, payload) => {
 });
 
 // 语音转文字：客户发来的语音先转文字，再走翻译通道（拿不到文字就没法翻）
-ipcMain.handle('yichat:asr', async (event, entry, audioBase64, mime, lang) => (
-  llm.transcribe(entry || {}, audioBase64, mime, lang)
-));
+// 3.8.1（S6）：补来源校验（带着完整 Key 条目出网，与 llm:translate 同级敏感）
+ipcMain.handle('yichat:asr', async (event, entry, audioBase64, mime, lang) => {
+  assertTrusted(event, 'yichat:asr');
+  return llm.transcribe(entry || {}, audioBase64, mime, lang);
+});
 
 // 单实例锁：已有实例运行时，新启动的实例直接聚焦旧窗口后退出
 // 访客页（各平台 webview）关掉后台节流：切到后台/被遮住时不冻结页面，
@@ -922,7 +1037,9 @@ function createWindow() {
 // ---- IPC 通道：适配器管理 ----
 
 // 列出所有已注册平台
-ipcMain.handle('scrm:list-platforms', async () => {
+// 3.8.1（S6）：scrm:* 全套补来源校验（审计点名）——合法调用方只有宿主渲染层
+ipcMain.handle('scrm:list-platforms', async (event) => {
+  assertTrusted(event, 'scrm:list-platforms');
   return listAdapters();
 });
 
@@ -932,6 +1049,7 @@ const subscribedAdapters = new Set();
 // 连接指定平台；连接成功后订阅其新消息并转发给渲染层
 // 状态机由适配器注册表跟踪：connecting -> connected / connected-mock
 ipcMain.handle('scrm:connect', async (event, platformId, options) => {
+  assertTrusted(event, 'scrm:connect'); // 3.8.1（S6）
   const adapter = getAdapter(platformId);
   const result = await connectAdapter(platformId, options);
   if (result.ok && typeof adapter.onMessage === 'function' && !subscribedAdapters.has(platformId)) {
@@ -947,28 +1065,33 @@ ipcMain.handle('scrm:connect', async (event, platformId, options) => {
 
 // 断开指定平台
 ipcMain.handle('scrm:disconnect', async (event, platformId) => {
+  assertTrusted(event, 'scrm:disconnect'); // 3.8.1（S6）
   return disconnectAdapter(platformId);
 });
 
 // 查询指定平台的连接状态（disconnected / connecting / connected / connected-mock）
 ipcMain.handle('scrm:adapter-status', async (event, platformId) => {
+  assertTrusted(event, 'scrm:adapter-status'); // 3.8.1（S6）
   return getAdapterStatus(platformId);
 });
 
 // 取会话列表
 ipcMain.handle('scrm:get-conversations', async (event, platformId) => {
+  assertTrusted(event, 'scrm:get-conversations'); // 3.8.1（S6）
   const adapter = getAdapter(platformId);
   return adapter.getConversations();
 });
 
 // 取某个会话的聊天记录
 ipcMain.handle('scrm:get-messages', async (event, platformId, convId) => {
+  assertTrusted(event, 'scrm:get-messages'); // 3.8.1（S6）
   const adapter = getAdapter(platformId);
   return adapter.getMessages(convId);
 });
 
 // 发送消息
 ipcMain.handle('scrm:send-message', async (event, platformId, convId, text) => {
+  assertTrusted(event, 'scrm:send-message'); // 3.8.1（S6）
   const adapter = getAdapter(platformId);
   return adapter.sendMessage(convId, text);
 });
@@ -1061,13 +1184,14 @@ ipcMain.handle('yichat:translate-google', async (event, text, targetLang, proxy,
   }
   return translateGoogleViaProxy(text, targetLang, proxy);
 });
-ipcMain.handle('llm:tts', async (event, entry, text, voice) => llm.tts(entry || {}, text, voice));
+ipcMain.handle('llm:tts', async (event, entry, text, voice) => { assertTrusted(event, 'llm:tts'); return llm.tts(entry || {}, text, voice); }); // 3.8.1（S6）补校验
 
 // ---- IPC 通道：webview 会话基础设施 ----
 
 // 取 webview 预加载脚本的 file:// URL（渲染层传给 <webview preload> 属性）
 // name 仅允许字母数字与连字符，防止路径穿越
 ipcMain.handle('wa:preload-path', async (event, name) => {
+  assertTrusted(event, 'wa:preload-path'); // 3.8.1（S6）
   const { pathToFileURL } = require('url');
   const safeName = String(name || '').replace(/[^a-z0-9-]/gi, '');
   if (!safeName) throw new Error('非法预加载脚本名');

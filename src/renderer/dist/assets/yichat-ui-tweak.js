@@ -87,7 +87,7 @@
     '左侧没有这个平台：': 'No such platform on the left: ',
     '这个入口在当前版本里没有': 'This entry is not available in this version',
     '最新': 'Latest', '译文': 'Trans', '截图': 'Shot', '搜记录': 'Search', '未读': 'Unread',
-    '平台状态': 'Platforms', '未读待办': 'Unread', '快捷入口': 'Shortcuts', '今日翻译': 'Translations today',
+    '平台状态': 'Platforms', '已验证': 'Verified', '未验证': 'Unverified', '数据备份': 'Data backup', '导出备份': 'Export', '恢复备份': 'Restore', '已导出': 'Exported', '项配置': 'settings', '已取消导出': 'Export canceled', '已取消恢复': 'Restore canceled', '导出失败': 'Export failed', '读取备份失败': 'Could not read backup', '这不是 YiChat 的备份文件': 'Not a YiChat backup file', '将用备份覆盖当前配置': 'This will overwrite current settings with the backup', '项': 'items', '确定恢复吗？': 'Restore now?', '确认恢复': 'Restore', '取消': 'Cancel', '恢复完成，正在重新加载…': 'Restored. Reloading…', 'Key · 账号 · 设置': 'Keys · accounts · settings', '导出一个文件，含全部 Key、账号与设置；换电脑或重装时导入即可恢复。此文件等于钥匙串，请妥善保管。': 'One file with all keys, accounts and settings. Import it on a new PC or after a reinstall. Treat it like a keychain — keep it safe.', '未读待办': 'Unread', '快捷入口': 'Shortcuts', '今日翻译': 'Translations today',
     '快捷键速查': 'Shortcuts', '缩放平台页面': 'Zoom platform pages', '重置缩放 100%': 'Reset zoom to 100%',
     '会话置于顶部 / 恢复': 'Pin session to top / restore', '收起 / 展开该条译文': 'Collapse or expand a translation',
     '近 7 天': 'Last 7 days', '今日': 'today',
@@ -163,6 +163,8 @@
     '今日概览': 'Today', '仅本统计': 'local stats',
     '成功率': 'Success', '覆盖平台': 'Platforms',
     '翻译节点': 'Translate node', '平均翻译延迟，点击查看性能详情': 'Average latency — click for performance details',
+    '不通': 'Unreachable', '收起': 'Collapse',
+    '翻译节点不通，翻译会明显变卡，去翻译设置看下节点': 'Translate node unreachable — translation will lag noticeably; check the node in Translation settings',
     '优秀': 'Excellent', '良好': 'Good', '偏慢': 'Slow', '暂无数据': 'No data',
     '暂无平台': 'No platforms yet',
     '每个平台默认翻译成哪种语言': 'default target language per platform',
@@ -213,6 +215,54 @@
       if (p && typeof p.then === 'function') p.then(function (s) { lastStats = s; }).catch(function () {});
     } catch (e) {}
   }
+
+  // —— 翻译节点呈现统一（2026-11-21 3.6.12）——
+  // 同一延迟值曾经在同屏两种写法：标题栏（编译包渲染）「偏慢 -5747ms」（bundle
+  // 把 '-' 写死成分隔符，读起来像负数），异常条「5747 ms」。现在口径只有一个：
+  // nodeMsInfo 给 {state, ms, text}——有效数值 →「5747 ms」；主进程判 down
+  // （今日请求全失败/延迟样本损坏）→「不通」、不带数字；无数据 → nodata。
+  // 标题栏数值格式已在 bundle 里定点修正（'-' 改空格）；down 态编译包分不出来
+  // （avgMs<=0 只显示暂无数据），由 patchNodeStatus 改写其文本节点，退出 down 时
+  // 按 bundle 口径还原（bundle 自身状态未变时不会重渲染，不还原会把不通挂死）。
+  function nodeMsInfo(st) {
+    if (!st) return { state: 'nodata', ms: 0, text: '' };
+    if (st.nodeState === 'down') return { state: 'down', ms: 0, text: L('不通') };
+    if (st.avgMs > 0) return { state: st.avgMs > 1200 ? 'slow' : 'ok', ms: Math.round(st.avgMs), text: Math.round(st.avgMs) + ' ms' };
+    return { state: 'nodata', ms: 0, text: '' };
+  }
+  var NODE_GRADE_COLORS = { excellent: '#52c41a', normal: '#fa8c16', high: '#f5222d', none: '#98a2b3' };
+  function patchNodeStatus() {
+    try {
+      refreshStats(false);
+      var el = document.querySelector('[data-t="node-status"]');
+      if (!el) return;
+      var st = lastStats;
+      if (!st) return;
+      var info = nodeMsInfo(st);
+      var tn = null;
+      for (var i = 0; i < el.childNodes.length; i++) {
+        if (el.childNodes[i].nodeType === 3 && /\S/.test(el.childNodes[i].nodeValue || '')) { tn = el.childNodes[i]; break; }
+      }
+      if (!tn) return;
+      var en = curLang() === 'en';
+      if (info.state === 'down') {
+        var want = en ? 'Translate node: Unreachable' : '翻译节点：不通';
+        if (tn.nodeValue !== want) tn.nodeValue = want;
+        el.setAttribute('data-yc-nodedown', '1');
+        if (el.style.color !== 'rgb(245, 34, 45)') el.style.color = '#f5222d';
+      } else if (el.getAttribute('data-yc-nodedown')) {
+        el.removeAttribute('data-yc-nodedown');
+        var label, color;
+        if (info.state === 'nodata') { label = en ? 'No data' : '暂无数据'; color = NODE_GRADE_COLORS.none; }
+        else if (st.avgMs <= 400) { label = en ? 'Excellent' : '优秀'; color = NODE_GRADE_COLORS.excellent; }
+        else if (st.avgMs <= 1200) { label = en ? 'Good' : '良好'; color = NODE_GRADE_COLORS.normal; }
+        else { label = en ? 'Slow' : '偏慢'; color = NODE_GRADE_COLORS.high; }
+        tn.nodeValue = (en ? 'Translate node: ' : '翻译节点：') + label + (info.state === 'nodata' ? '' : ' ' + info.text);
+        el.style.color = color;
+      }
+    } catch (e) {}
+  }
+  setInterval(patchNodeStatus, 1000);
 
 
 
@@ -345,6 +395,29 @@
         }
       }
     } catch (e) {}
+  }
+
+  // 3.7.0 单击直达：点账号卡本体（避开卡上按钮/链接/输入）且账号离线时，等同点上线钮；
+  // 会话列表只在上线后出现，这是注入层能达到的最近一步「单击打开」
+  function ensureCardClick() {
+    if (ensureCardClick.done) return;
+    ensureCardClick.done = true;
+    document.addEventListener('click', function (e) {
+      try {
+        var t = e.target;
+        if (!t || !t.closest) return;
+        if (t.closest('button, a, input, select, textarea, [data-t="card-online-btn"], [data-t="card-offline-btn"]')) return;
+        var card = t.closest('.sess-acc-card');
+        if (!card || isCardOnline(card)) return;
+        var btn = cardOnlineBtn(card);
+        if (btn) btn.click();
+      } catch (err) {}
+    }, false);
+  }
+  // 图标按钮必带说明：上线钮补原生 tooltip
+  function ensureOnlineTitles() {
+    var btns = document.querySelectorAll('[data-t="card-online-btn"]:not([data-yc-title])');
+    for (var i = 0; i < btns.length; i++) { btns[i].setAttribute('data-yc-title', '1'); btns[i].setAttribute('title', L('上线（打开会话）')); }
   }
 
   var HINT_KEY = 'yichat_hint_pick_chat';
@@ -482,8 +555,10 @@
 
     var b3 = dockBtn('shot', '截图', SVG_CAMERA, '把当前会话截成图片放进剪贴板');
     b3.addEventListener('click', function (e) { e.stopPropagation(); captureChat(); });
-    var b4 = dockBtn('ai', 'AI 帮写', SVG_SPARK, '用中文梗概生成外语回复');
-    b4.addEventListener('click', function (e) { e.stopPropagation(); aiOpen(); });
+    var b4 = dockBtn('ai', 'AI 帮写', SVG_SPARK, '用中文梗概生成外语回复（单击打开，双击关闭）');
+    // 3.8.8：帮写钮回归标准开关——点一下开、再点一下关（3.8.2 的「单击只开+双击关」
+    // 是给遮罩盖钮打的补丁；遮罩早已给工具栏让位，补丁本身成了别扭交互，用户点名改回）
+    b4.addEventListener('click', function (e) { e.stopPropagation(); if (document.getElementById('yc-ai-mask')) aiClose(); else aiOpen(true); });
 
     // v21：搜记录 / 未读两个键按需求移除（未读汇总从主页未读卡打开，系统通知不受影响）
 
@@ -1598,11 +1673,12 @@
     var m = document.getElementById('yc-ai-mask');
     if (m && m.parentNode) m.parentNode.removeChild(m);
   }
-  function aiOpen() {
-    if (document.getElementById('yc-ai-mask')) { aiClose(); return; }
+  function aiOpen(fromDock) {
+    if (document.getElementById('yc-ai-mask')) return;
     var en = curLang() === 'en';
     var mask = mkEl('div', '');
     mask.id = 'yc-ai-mask';
+    if (fromDock) mask.classList.add('yc-from-dock');
     var box = mkEl('div', 'yc-ai');
     var head = mkEl('div', 'yc-ai-head');
     head.appendChild(mkEl('span', 'yc-ai-star', '✦'));
@@ -1730,7 +1806,7 @@
   //   左：快捷入口六宫格 + 近 7 天翻译量柱状图 + 快捷键条
   //   右：平台状态 + 未读待办 + 翻译节点
   // 数据全部走既有管道：acctSnapshot / collectUnread / getDailyStats，不新增数据源。
-  var ACCENTS = { blue: '#005dff', purple: '#722ed1', teal: '#08979c', orange: '#fa8c16' };
+  var ACCENTS = { blue: '#2F6BFF', purple: '#722ed1', teal: '#08979c', orange: '#fa8c16' };
   function curAccent() {
     try { return localStorage.getItem('yichat_accent') || 'blue'; } catch (e) { return 'blue'; }
   }
@@ -1752,6 +1828,96 @@
     if (h < 19) return L('下午好');
     return L('晚上好');
   }
+
+  // ===== 数据备份 / 恢复（2026-11-23，3.8.9）=====
+  // 范围：渲染层 localStorage 中 yichat*/yc-*/yc_*/cq 全部键（Key 列表、各平台账号
+  // 记录、功能选 Key、翻译与界面设置）。读写都走正常 Storage API：yichat-api-keys
+  // 经 vault shim 读时解密、写时加密，故备份是明文视图、可跨机恢复；平台登录态在
+  // 各自分区里，不在备份范围，恢复也不动它。
+  function ycIsBackupKey(k) {
+    return !!k && (k.indexOf('yichat') === 0 || k.indexOf('yc-') === 0 || k.indexOf('yc_') === 0 || k === 'cq');
+  }
+  function ycCollectBackup() {
+    var data = {};
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (ycIsBackupKey(k)) { try { data[k] = localStorage.getItem(k); } catch (e) {} }
+      }
+    } catch (e) {}
+    return { app: 'YiChat', kind: 'yichat-config-backup', version: 1, exportedAt: new Date().toISOString(), data: data };
+  }
+  function ycBackupStatus(msg, isErr) {
+    try {
+      var st = document.querySelector('.yc3-backup-status');
+      if (st) { st.textContent = msg; st.style.color = isErr ? '#d33' : ''; }
+    } catch (e) {}
+  }
+  var ycPendingBackup = null;
+  function ycBackupExport() {
+    var payload = ycCollectBackup();
+    var n = Object.keys(payload.data).length;
+    var json = JSON.stringify(payload, null, 1);
+    if (window.yichat && window.yichat.exportBackup) {
+      window.yichat.exportBackup(json).then(function (r) {
+        if (r && r.ok) ycBackupStatus(L('已导出') + ' ' + n + ' ' + L('项配置') + (r.name ? '：' + r.name : ''));
+        else if (r && r.canceled) ycBackupStatus(L('已取消导出'));
+        else ycBackupStatus(L('导出失败') + '：' + ((r && r.message) || ''), true);
+      }, function () { ycBackupStatus(L('导出失败'), true); });
+    } else {
+      try {
+        var blob = new Blob([json], { type: 'application/json' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'yichat-backup.json';
+        document.body.appendChild(a); a.click();
+        setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 500);
+        ycBackupStatus(L('已导出') + ' ' + n + ' ' + L('项配置'));
+      } catch (e) { ycBackupStatus(L('导出失败'), true); }
+    }
+  }
+  function ycBackupImport() {
+    if (!(window.yichat && window.yichat.importBackup)) { toast(L('当前版本不支持这个操作'), true); return; }
+    window.yichat.importBackup().then(function (r) {
+      if (!r || !r.ok) { if (r && !r.canceled) ycBackupStatus(L('读取备份失败') + '：' + ((r && r.message) || ''), true); return; }
+      var parsed = null;
+      try { parsed = JSON.parse(r.text); } catch (e) {}
+      if (!parsed || parsed.kind !== 'yichat-config-backup' || !parsed.data || typeof parsed.data !== 'object') {
+        ycBackupStatus(L('这不是 YiChat 的备份文件'), true); return;
+      }
+      ycPendingBackup = parsed;
+      ycBackupShowConfirm();
+    }, function () { ycBackupStatus(L('读取备份失败'), true); });
+  }
+  function ycBackupShowConfirm() {
+    var st = document.querySelector('.yc3-backup-status');
+    if (!st || !ycPendingBackup) return;
+    var n = Object.keys(ycPendingBackup.data).length;
+    var when = String(ycPendingBackup.exportedAt || '').slice(0, 10);
+    st.style.color = '';
+    st.textContent = '';
+    st.appendChild(document.createTextNode(L('将用备份覆盖当前配置') + '（' + n + ' ' + L('项') + (when ? ' · ' + when : '') + '），' + L('确定恢复吗？') + ' '));
+    var ok = mkEl('button', 'yc3-keys-btn', L('确认恢复')); ok.setAttribute('data-act', 'backup-confirm'); ok.setAttribute('data-yc', '1');
+    var no = mkEl('button', 'yc3-keys-btn', L('取消')); no.setAttribute('data-act', 'backup-cancel'); no.setAttribute('data-yc', '1');
+    st.appendChild(ok); st.appendChild(document.createTextNode(' ')); st.appendChild(no);
+  }
+  function ycBackupApply() {
+    if (!ycPendingBackup) return;
+    var data = ycPendingBackup.data;
+    try {
+      var kill = [];
+      for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (ycIsBackupKey(k) && !(k in data)) kill.push(k); }
+      kill.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+      Object.keys(data).forEach(function (k) {
+        try { if (data[k] == null) localStorage.removeItem(k); else localStorage.setItem(k, String(data[k])); } catch (e) {}
+      });
+    } catch (e) {}
+    ycPendingBackup = null;
+    ycBackupStatus(L('恢复完成，正在重新加载…'));
+    setTimeout(function () { try { location.reload(); } catch (e) {} }, 700);
+  }
+  // 排障/自测钩子（与 __ycVaultState 同例）：无 UI 入口，供仿真与售后核对备份内容
+  try { window.__ycBackupTest = { collect: ycCollectBackup, isKey: ycIsBackupKey }; } catch (e) {}
 
   function buildWorkbench() {
     var wb = mkEl('div', 'yc-wb yc-wb3');
@@ -1828,6 +1994,13 @@
     alWrap.appendChild(alBar);
     wb.appendChild(alWrap);
 
+    // 需处理区（3.7.0 设计系统）：配置类阻断项的页内专区——与异常条分工：
+    // 异常条管运行时异常（健康/节点/失败/掉线），需处理区管配置阻断（Key 未配置/
+    // 默认 Key 未指定）。无阻断项时整区收起不占位；paintNeed 按签名填充。
+    var needWrap = mkEl('div', 'yc3-need-wrap');
+    needWrap.style.display = 'none';
+    wb.appendChild(needWrap);
+
     // ③ 两栏
     var cols = mkEl('div', 'yc3-cols');
     var left = mkEl('div', 'yc3-left');
@@ -1846,6 +2019,10 @@
     var hrow = mkEl('div', 'yc3-hidden-row');
     qw.appendChild(hrow);
     renderTiles(wb);
+    // 3.7.0：快捷入口整行上提到第一屏（原在左栏图表下方，需滚动才够得着）
+    wb.appendChild(qw);
+    // 异常条浮层锚点随迁到快捷入口之后：条浮在栅格顶部，不再盖住需处理区与瓷砖行
+    wb.appendChild(alWrap);
 
     // 近 7 天翻译量（本机统计 history，paint 填充）
     var chart = mkEl('div', 'yc3-card yc3-chart-card');
@@ -1865,7 +2042,13 @@
     chH.appendChild(chTot);
     chart.appendChild(chH);
     chart.appendChild(mkEl('div', 'yc3-chart'));
-    chart.appendChild(mkEl('div', 'yc3-chart-empty', ''));
+    var chEmpty = mkEl('div', 'yc3-chart-empty yc7-empty');
+    var chIco = mkEl('span', 'yc7-empty-ico'); chIco.innerHTML = ICO_CHART; chEmpty.appendChild(chIco);
+    chEmpty.appendChild(mkEl('b', 'yc7-empty-t', L('暂无数据')));
+    chEmpty.appendChild(mkEl('span', 'yc7-empty-d', L('翻译后这里会长出柱子')));
+    // 3.7.1：图表卡空态按设计说明只给图标＋标题＋描述，不带动作按钮
+    // （「打开会话」是未读卡的动作；此按钮曾是真机溢出卡界的元凶之一，已删除）
+    chart.appendChild(chEmpty);
     left.appendChild(chart);
 
     // 快捷键条
@@ -1884,18 +2067,12 @@
       tips.appendChild(ts);
     }
     chart.appendChild(tips);
-    left.appendChild(qw);
     cols.appendChild(left);
-
-    // 顶带（第 2 步）：待处理置顶——未读（宽）＋平台状态（定宽 302 与右栏齐）
-    var toprow = mkEl('div', 'yc3-toprow');
-    toprow.style.cssText = 'display:flex;gap:var(--wb-gap);margin-bottom:var(--wb-gap);align-items:stretch;';
 
     // 右栏
     var right = mkEl('div', 'yc3-right');
 
     var pc3 = mkEl('div', 'yc3-card');
-    pc3.style.cssText = 'width:302px;flex:none;';
     var pcH = mkEl('div', 'yc3-card-h');
     pcH.appendChild(mkEl('b', '', L('平台状态')));
     pcH.appendChild(mkEl('span', 'yc3-card-s yc3-plats-sub', ''));
@@ -1906,14 +2083,15 @@
     if (pl3) pl3.style.cssText = '';
 
     var uc = mkEl('div', 'yc3-card yc3-unread-card');
-    uc.style.cssText = 'flex:1;min-width:0;';
     var ucH = mkEl('div', 'yc3-card-h');
     ucH.appendChild(mkEl('b', '', L('未读待办')));
     ucH.appendChild(mkEl('span', 'yc3-card-s yc3-un-sub', ''));
     uc.appendChild(ucH);
     uc.appendChild(mkEl('div', 'yc3-unread'));
-    toprow.appendChild(uc);
-    toprow.appendChild(pc3);
+    // 3.7.0 信息架构：左列＝未读待办 → 图表；右列＝平台状态 → Key → 用量
+    left.appendChild(uc);
+    left.appendChild(chart);
+    right.appendChild(pc3);
 
     // 翻译节点卡已删（2026-11-20 用户采纳建议）：信息与顶栏状态＋头部统计重复，改为异常才在顶部出提醒条（paintAlert）
 
@@ -1924,6 +2102,13 @@
     kcH.appendChild(mkEl('span', 'yc3-card-s', L('各功能实际用的 Key')));
     kc.appendChild(kcH);
     kc.appendChild(mkEl('div', 'yc3-keys'));
+    var kcF = mkEl('div', 'yc3-keys-foot');
+    kcF.appendChild(mkEl('span', 'yc3-keys-note', ''));
+    var kcB = mkEl('button', 'yc3-keys-btn', L('管理 Key'));
+    kcB.setAttribute('data-act', 'keys-manage');
+    kcB.setAttribute('data-yc', '1');
+    kcF.appendChild(kcB);
+    kc.appendChild(kcF);
     right.appendChild(kc);
 
     // 语音 / 看图用量（2026-11-20 用户点选加）：本机按天统计，paint 填充
@@ -1935,13 +2120,29 @@
     uc2.appendChild(mkEl('div', 'yc3-usage'));
     right.appendChild(uc2);
 
+    // 数据备份卡（2026-11-23，3.8.9）：配置止血入口，行为走 wb 事件委托 data-act
+    var bc = mkEl('div', 'yc3-card yc3-backup-card');
+    var bcH = mkEl('div', 'yc3-card-h');
+    bcH.appendChild(mkEl('b', '', L('数据备份')));
+    bcH.appendChild(mkEl('span', 'yc3-card-s', L('Key · 账号 · 设置')));
+    bc.appendChild(bcH);
+    var bcB = mkEl('div', 'yc3-backup');
+    bcB.appendChild(mkEl('div', 'yc3-backup-note', L('导出一个文件，含全部 Key、账号与设置；换电脑或重装时导入即可恢复。此文件等于钥匙串，请妥善保管。')));
+    var bcRow = mkEl('div', 'yc3-backup-row');
+    var bExp = mkEl('button', 'yc3-keys-btn', L('导出备份')); bExp.setAttribute('data-act', 'backup-export'); bExp.setAttribute('data-yc', '1');
+    var bImp = mkEl('button', 'yc3-keys-btn', L('恢复备份')); bImp.setAttribute('data-act', 'backup-import'); bImp.setAttribute('data-yc', '1');
+    bcRow.appendChild(bExp); bcRow.appendChild(bImp);
+    bcB.appendChild(bcRow);
+    bcB.appendChild(mkEl('div', 'yc3-backup-status', ''));
+    bc.appendChild(bcB);
+    right.appendChild(bc);
+
     cols.appendChild(right);
-    wb.appendChild(toprow);
     wb.appendChild(cols);
 
     // 页脚
     var foot = mkEl('div', 'yc2-foot');
-    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.6.11'));
+    foot.appendChild(mkEl('span', 'yc2-foot-l', L('翻译 · 本机数据不上传') + ' · v3.8.9'));
     wb.appendChild(foot);
 
     // 事件委托：卡片被反复重建也不会丢点击
@@ -1953,6 +2154,13 @@
       if (act === 'accent') { applyAccent(wb, t.getAttribute('data-acc')); return; }
       if (act === 'palette') { palOpen(); return; }
       if (act === 'ai') { aiOpen(); return; }
+      if (act === 'keys-manage' || act === 'need-keys') { clickQuick('apikey'); return; }
+      if (act === 'backup-export') { ycBackupExport(); return; }
+      if (act === 'backup-import') { ycBackupImport(); return; }
+      if (act === 'backup-confirm') { ycBackupApply(); return; }
+      if (act === 'backup-cancel') { ycPendingBackup = null; ycBackupStatus(L('已取消恢复')); return; }
+      if (act === 'need-translate') { clickQuick('translate'); return; }
+      if (act === 'open-session') { var rp0 = railPlatforms(); if (rp0.length) gotoPlatform(rp0[0].key); else toast(L('暂无平台'), true); return; }
       if (act === 'goal') { cycleGoal(); paintWorkbench(true); return; }
       if (act === 'tiles-edit') { wb.classList.toggle('yc3-editing'); renderTiles(wb); return; }
       if (act === 'tile-hide') { var tp1 = tilePrefs(); var hk3 = t.getAttribute('data-k'); if (tp1.hidden.indexOf(hk3) < 0) tp1.hidden.push(hk3); saveTilePrefs(tp1); renderTiles(wb); return; }
@@ -1992,19 +2200,18 @@
           kc.innerHTML = '';
           rows.forEach(function (r) {
             var row = mkEl('div', 'yc3-kv');
-            row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;font-size:13px;';
-            var lb1 = mkEl('span', 'yc3-kv-l', L(r[0])); lb1.style.color = 'var(--wb-t2)'; row.appendChild(lb1);
-            var v = mkEl('span', 'yc3-kv-v');
-            if (r[1]) {
-              v.textContent = (r[1].name || '未命名') + ' · ' + (r[1].model || r[1].ttsModel || r[1].asrModel || '');
-              v.style.cssText = 'color:var(--wb-t1);font-weight:600;text-align:right;word-break:break-all;';
-            } else {
-              v.textContent = L('未配置');
-              v.style.cssText = 'color:#d4380d;font-weight:600;';
-            }
+            row.appendChild(mkEl('span', 'yc3-kv-l', L(r[0])));
+            var v = mkEl('span', 'yc3-kv-v' + (r[1] ? '' : ' none'));
+            v.textContent = r[1] ? ((r[1].name || '未命名') + ' · ' + (r[1].model || r[1].ttsModel || r[1].asrModel || '')) : L('未配置');
             row.appendChild(v);
             kc.appendChild(row);
           });
+          // 页脚随配置状态换文案（有缺失→去录入；齐全→管理）
+          var anyMiss = rows.some(function (r) { return !r[1]; });
+          var knote = wb.querySelector('.yc3-keys-note');
+          if (knote) knote.textContent = anyMiss ? L('录入后自动检测连接') : L('保存 Key 时自动检测连接');
+          var kbtn = wb.querySelector('.yc3-keys-btn');
+          if (kbtn) kbtn.textContent = anyMiss ? L('去录入 Key') : L('管理 Key');
         }
       }
       var uc = wb.querySelector('.yc3-usage');
@@ -2016,10 +2223,13 @@
           uc.innerHTML = '';
           [['今日', t1], ['近7天', t7]].forEach(function (pr) {
             var row = mkEl('div', 'yc3-kv');
-            row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;font-size:13px;';
-            var lb2 = mkEl('span', 'yc3-kv-l', L(pr[0])); lb2.style.color = 'var(--wb-t2)'; row.appendChild(lb2);
-            var v = mkEl('span', 'yc3-kv-v', '语音 ' + pr[1].v + ' · 看图 ' + pr[1].i + ' · 合成 ' + pr[1].t);
-            v.style.cssText = 'color:var(--wb-t1);font-weight:600;';
+            row.appendChild(mkEl('span', 'yc3-kv-l', L(pr[0])));
+            var v = mkEl('span', 'yc3-kv-v');
+            [['语音', pr[1].v], ['看图', pr[1].i], ['合成', pr[1].t]].forEach(function (seg, si) {
+              if (si) v.appendChild(document.createTextNode(' · '));
+              v.appendChild(document.createTextNode(seg[0] + ' '));
+              v.appendChild(mkEl('b', 'yc3-kv-n', String(seg[1])));
+            });
             row.appendChild(v);
             uc.appendChild(row);
           });
@@ -2028,28 +2238,27 @@
     } catch (e) {}
   }
 
+  // 异常条折叠态（3.6.12）：默认收起只露一行，展开由用户点 chip；异常集合变化
+  // （签名变）时重建并自动收回——新异常要先以摘要形态跳出来，而不是藏在展开里
+  var alertExpanded = false;
+  function alertMoreText(n) {
+    return curLang() === 'en' ? (n + ' more ▾') : ('还有 ' + n + ' 条 ▾');
+  }
+
   // 异常提醒（替你盯）：节点偏慢 / 今日失败≥3 / 核心 Key 缺失 / 平台掉线，四类异常才出声
   function paintAlert(wb) {
     var al = wb.querySelector('#ycAlert');
     if (!al) return;
     var st = lastStats;
     var items = [];
-    if (st && st.avgMs > 1200) items.push('🌐 ' + L('翻译节点偏慢') + '（' + Math.round(st.avgMs) + ' ms），' + L('翻译会明显变卡，去翻译设置看下节点'));
-    if (st && (st.fail || 0) >= 3) items.push('⚠️ ' + L('今日翻译失败') + ' ' + st.fail + ' ' + L('条，去翻译设置检查节点或 Key'));
-    try { if (!visionEntry()) items.push('🔑 ' + L('核心 Key 未配置：翻译、看图、AI 帮写都用不了，去 设置 → API Key 里添加')); } catch (e) {}
-    // 翻译默认 Key 未指定（3.6.8 补声，审计 S1）：条目都在、通道也走大模型API，
-    // 唯独没在翻译设置里选默认 Key 时，编译包管线取不到条目会静默不翻——明确报出来
-    try {
-      if (apiKeyList().length && !defaultKeyId('translate')) {
-        var tc0 = {};
-        try { tc0 = JSON.parse(localStorage.getItem('yichat_trans_config') || '{}'); } catch (e3) {}
-        var chS = (tc0.send && tc0.send.channel) || '谷歌';
-        var chR = (tc0.recv && tc0.recv.channel) || '谷歌';
-        if (chS === '大模型API' || chR === '大模型API') {
-          items.push('🔑 ' + L('翻译默认 Key 未指定：到 设置 → 翻译设置 里选用一把 Key，否则大模型翻译不会工作'));
-        }
-      }
-    } catch (e) {}
+    var itemPrio = []; // 与 items 平行：显示优先级（见下方 dispLines 排序说明）
+    // 3.6.12：节点行走统一口径 nodeMsInfo——down 显示「不通」不带数字，slow 带「XXXX ms」
+    var nInfoA = nodeMsInfo(st);
+    if (nInfoA.state === 'down') { items.push('🌐 ' + L('翻译节点不通，翻译会明显变卡，去翻译设置看下节点')); itemPrio.push(5); }
+    else if (nInfoA.state === 'slow') { items.push('🌐 ' + L('翻译节点偏慢') + '（' + nInfoA.text + '），' + L('翻译会明显变卡，去翻译设置看下节点')); itemPrio.push(5); }
+    if (st && (st.fail || 0) >= 3) { items.push('⚠️ ' + L('今日翻译失败') + ' ' + st.fail + ' ' + L('条，去翻译设置检查节点或 Key')); itemPrio.push(3); }
+    // 3.7.0 分工：配置类阻断（核心 Key 未配置 / 翻译默认 Key 未指定）不再进异常条，
+    // 改由 paintNeed 的需处理区承载（页内常驻、一项一动作）；异常条只管运行时异常。
     var seen = paintAlert._seen || (paintAlert._seen = {});
     var rows = wb.querySelectorAll('.yc3-prow');
     for (var i = 0; i < rows.length; i++) {
@@ -2057,7 +2266,7 @@
       var on = !!rows[i].querySelector('.yc3-sdot.on');
       var nmEl = rows[i].querySelector('.yc3-pname');
       if (on) seen[k] = nmEl ? nmEl.textContent : k;
-      else if (seen[k]) items.push('🔌 ' + seen[k] + ' ' + L('已断开，点左侧它的图标重新打开'));
+      else if (seen[k]) { items.push('🔌 ' + seen[k] + ' ' + L('已断开，点左侧它的图标重新打开')); itemPrio.push(4); }
     }
     // 健康自检行（3.6.10）：与主异常集合分开管理——每条健康异常有自己的签名与
     // 关闭记录（yc-health-dismissed），恢复时由 bindHealth 连签名一起清掉
@@ -2077,15 +2286,40 @@
     var vsig = va ? va.sig : '';
     var sig = items.join('|');
     var hsig = hSigs.join(',');
+    // 3.6.12：显示顺序按优先级重排（旧顺序是节点行在最前、健康行最后，与轻重缓急
+    // 相反）：健康·翻译未生效 0 ＞ vault·Key 加密 1 ＞ Key 配置类 2 ＞ 今日失败 3 ＞
+    // 平台掉线 4 ＞ 节点提醒 5。同级保原序（稳定排序）。sig/hsig 仍按原集合计算，
+    // 关闭记录口径不变。
+    var dispLines = [];
+    for (var hp = 0; hp < hLines.length; hp++) dispLines.push({ t: hLines[hp], p: 0 });
+    for (var vp = 0; vp < vLines.length; vp++) dispLines.push({ t: vLines[vp], p: 1 });
+    for (var ip = 0; ip < items.length; ip++) dispLines.push({ t: items[ip], p: itemPrio[ip] != null ? itemPrio[ip] : 5 });
+    dispLines.sort(function (a, b) { return a.p - b.p; });
     if (al.getAttribute('data-sig') !== sig || al.getAttribute('data-hsig') !== hsig || al.getAttribute('data-vsig') !== vsig) {
       al.setAttribute('data-sig', sig);
       al.setAttribute('data-hsig', hsig);
       al.setAttribute('data-vsig', vsig);
+      alertExpanded = false;
       al.innerHTML = '';
-      for (var j = 0; j < items.length; j++) al.appendChild(mkEl('div', 'yc3-alert-line', items[j]));
-      for (var hj = 0; hj < hLines.length; hj++) al.appendChild(mkEl('div', 'yc3-alert-line', hLines[hj]));
-      for (var vj = 0; vj < vLines.length; vj++) al.appendChild(mkEl('div', 'yc3-alert-line', vLines[vj]));
-      if (items.length || hLines.length || vLines.length) {
+      // 折叠态只露第一行（最高优先级），其余行 display:none；chip 负责展开/收起
+      for (var dj = 0; dj < dispLines.length; dj++) {
+        var dl = mkEl('div', 'yc3-alert-line', dispLines[dj].t);
+        if (dj > 0) dl.style.display = 'none';
+        al.appendChild(dl);
+      }
+      if (dispLines.length > 1) {
+        var chip = mkEl('div', 'yc3-alert-more', alertMoreText(dispLines.length - 1));
+        chip.setAttribute('data-yc', '1');
+        chip.style.cssText = 'cursor:pointer;opacity:.7;font-size:12px;line-height:1.7;';
+        chip.addEventListener('click', function () {
+          alertExpanded = !alertExpanded;
+          var rows2 = al.querySelectorAll('.yc3-alert-line');
+          for (var rr = 1; rr < rows2.length; rr++) rows2[rr].style.display = alertExpanded ? '' : 'none';
+          chip.textContent = alertExpanded ? (L('收起') + ' ▴') : alertMoreText(rows2.length - 1);
+        });
+        al.appendChild(chip);
+      }
+      if (dispLines.length) {
         var dx = mkEl('span', 'yc3-alert-x', '✕');
         dx.style.cssText = 'float:right;cursor:pointer;opacity:.65;';
         dx.setAttribute('data-yc', '1');
@@ -2111,9 +2345,60 @@
     try { dismissed = localStorage.getItem('yc-alert-dismissed') || ''; } catch (e) {}
     al.style.display = ((items.length && dismissed !== sig) || hLines.length || vLines.length) ? 'block' : 'none';
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    al.style.background = dark ? '#2a1f08' : '#fff7e6';
-    al.style.borderColor = dark ? '#6b4e12' : '#ffd591';
-    al.style.color = dark ? '#f0c97a' : '#7a4a00';
+    // 3.7.0 配色令牌化：含健康/vault 阻断行 → danger 色系；其余运行时提醒 → 沿用琥珀色
+    if (hLines.length || vLines.length) {
+      al.style.background = dark ? '#3a2320' : '#fef4f2';
+      al.style.borderColor = dark ? '#6e3a32' : '#f6d8d3';
+      al.style.color = dark ? '#f5b5ac' : '#7a271a';
+    } else {
+      al.style.background = dark ? '#2a1f08' : '#fff7e6';
+      al.style.borderColor = dark ? '#6b4e12' : '#ffd591';
+      al.style.color = dark ? '#f0c97a' : '#7a4a00';
+    }
+  }
+
+  // —— 需处理区（3.7.0）：配置阻断项的页内专区，一项一动作 ——
+  var NEED_ICO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  function configBlockers() {
+    var out = [];
+    try {
+      if (!visionEntry()) {
+        out.push({ k: 'nokey', t: L('功能 Key 未配置'), d: L('翻译、看图、AI 帮写与语音功能暂不可用，先录入一把 Key 即可开始使用。'), btn: L('去录入 Key'), act: 'need-keys' });
+      } else if (apiKeyList().length && !defaultKeyId('translate')) {
+        // 与旧异常条同条件：条目都在、通道走大模型API、唯独没选默认 Key → 静默不翻
+        var tc9 = {};
+        try { tc9 = JSON.parse(localStorage.getItem('yichat_trans_config') || '{}'); } catch (e9) {}
+        var chS9 = (tc9.send && tc9.send.channel) || '谷歌';
+        var chR9 = (tc9.recv && tc9.recv.channel) || '谷歌';
+        if (chS9 === '大模型API' || chR9 === '大模型API') {
+          out.push({ k: 'nodefault', t: L('翻译默认 Key 未指定'), d: L('大模型翻译不会工作，到翻译设置里选用一把 Key 即可。'), btn: L('去翻译设置'), act: 'need-translate' });
+        }
+      }
+    } catch (e) {}
+    return out;
+  }
+  function paintNeed(wb) {
+    var wrap = wb.querySelector('.yc3-need-wrap');
+    if (!wrap) return;
+    var items = configBlockers();
+    var sig = items.map(function (x) { return x.k; }).join(',');
+    if (wrap.getAttribute('data-sig') === sig) return;
+    wrap.setAttribute('data-sig', sig);
+    wrap.innerHTML = '';
+    items.forEach(function (it) {
+      var row = mkEl('div', 'yc3-need-item');
+      var ic = mkEl('span', 'yc3-need-ico'); ic.innerHTML = NEED_ICO; row.appendChild(ic);
+      var tx = mkEl('span', 'yc3-need-tx');
+      tx.appendChild(mkEl('b', '', it.t));
+      tx.appendChild(document.createTextNode(' — ' + it.d));
+      row.appendChild(tx);
+      var btn = mkEl('button', 'yc3-need-btn', it.btn);
+      btn.setAttribute('data-act', it.act);
+      btn.setAttribute('data-yc', '1');
+      row.appendChild(btn);
+      wrap.appendChild(row);
+    });
+    wrap.style.display = items.length ? 'flex' : 'none';
   }
 
   function paintWorkbench(force) {
@@ -2133,11 +2418,12 @@
       onSum += map[mk].on;
     }
     var sn = wb.querySelector('.yc3-gs-sess');
-    if (sn) { var stx = ' · ' + (en ? (onSum + ' online') : ('在线会话 ' + onSum)); if (sn.textContent !== stx) sn.textContent = stx; }
+    if (sn) { var stx = ' · ' + (en ? (onSum > 0 ? (onSum + ' online') : 'sessions connect when opened') : (onSum > 0 ? ('在线会话 ' + onSum) : '会话将在打开后连接')); if (sn.textContent !== stx) sn.textContent = stx; }
 
     // 数据：本机翻译统计 + 未读
     refreshStats(false);
     paintKeysUsage(wb);
+    paintNeed(wb);
     paintAlert(wb);
     var thb2 = wb.querySelector('#ycThemeBtn');
     if (thb2) { var thIc = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; if (thb2.textContent !== thIc) thb2.textContent = thIc; }
@@ -2166,9 +2452,9 @@
     if (gvOk) rollNum(gvOk, 'ok', okN);
     var gvRate = wb.querySelector('.yc3-gs-rate .yc3-gstat-v');
     if (gvRate) { if (totN > 0) rollNum(gvRate, 'rate', rateN, '%'); else { rollCache.rate = null; if (gvRate.textContent !== '—') gvRate.textContent = '—'; } }
-    // 成功率分档色（3.6.8 按 UI 规矩，审计 UI-10）：红色只用于出错——
-    // ≥90 主文字色（默认）/ 75–90 橙（注意）/ <75 红（出错）。原档位 91% 就标红，与规矩冲突
-    if (gvRate) { var rc = totN > 0 ? (rateN >= 90 ? '' : (rateN >= 75 ? '#fa8c16' : '#f04438')) : ''; if (gvRate.style.color !== rc) gvRate.style.color = rc; }
+    // 3.7.0 设计说明 3.7：统计数一律 text-1 同色同重（取代 3.6.8 的成功率分档着色；
+    // 红色只给需处理区/异常条里的真问题，不给数字）
+    if (gvRate && gvRate.style.color) gvRate.style.color = '';
     var gvUn = wb.querySelector('.yc3-gs-un .yc3-gstat-v');
     if (gvUn) rollNum(gvUn, 'un', data.total);
     var gsUn = wb.querySelector('.yc3-gs-un');
@@ -2190,7 +2476,7 @@
           bar.style.height = Math.max(3, Math.round(v / mx * 100)) + '%';
           bar.style.animationDelay = (550 + ci * 80) + 'ms';
           wrap.appendChild(bar);
-          wrap.appendChild(mkEl('span', 'yc3-bar-tip', String(cell.d || '').slice(5) + ' · ' + v + (en ? '' : ' 条')));
+          if (v > 0) wrap.appendChild(mkEl('span', 'yc3-bar-tip', String(cell.d || '').slice(5) + ' · ' + v + (en ? '' : ' 条')));
           wrap.appendChild(mkEl('span', 'yc3-bar-d', ci === hist.length - 1 ? L('今天') : String(cell.d || '').slice(5)));
           chart.appendChild(wrap);
         }
@@ -2206,9 +2492,14 @@
       if (cempty) {
         var showEmpty = hist.length > 0 && histSum === 0;
         cempty.style.display = showEmpty ? 'flex' : 'none';
+        if (chart.style.display !== (showEmpty ? 'none' : '')) chart.style.display = showEmpty ? 'none' : '';
         if (showEmpty) {
-          var etxt = en ? 'No data yet — bars will grow here as you translate' : '暂无数据 · 翻译后这里会长出柱子';
-          if (cempty.textContent !== etxt) cempty.textContent = etxt;
+          var et9 = cempty.querySelector('.yc7-empty-t');
+          var ed9 = cempty.querySelector('.yc7-empty-d');
+          var eT9 = en ? 'No data yet' : '暂无数据';
+          var eD9 = en ? 'Bars will grow here as you translate' : '翻译后这里会长出柱子';
+          if (et9 && et9.textContent !== eT9) et9.textContent = eT9;
+          if (ed9 && ed9.textContent !== eD9) ed9.textContent = eD9;
         }
       }
       var cpre = wb.querySelector('.yc3-chart-pre');
@@ -2219,7 +2510,8 @@
       if (cn) rollNum(cn, 'sum', histSum);
     }
 
-    // 平台状态
+    // 平台状态（已验证＝翻译+资料抓取在真机验到底的平台，2026-11-23 3.8.9 明示）
+    var YC_VERIFIED_PLATS = { telegram: 1, whatsapp: 1 };
     var pbox = wb.querySelector('.yc3-plats');
     if (pbox) {
       var unByPlat = {};
@@ -2255,6 +2547,7 @@
           row.appendChild(pic);
           row.appendChild(mkEl('span', 'yc3-pname', pp.name));
           var stBox = mkEl('span', 'yc3-pst');
+          stBox.appendChild(mkEl('span', 'yc3-ver ' + (YC_VERIFIED_PLATS[pp.key] ? 'ok' : 'no'), L(YC_VERIFIED_PLATS[pp.key] ? '已验证' : '未验证')));
           var un = unByPlat[pp.key] || ag.un || 0;
           if (un > 0) stBox.appendChild(mkEl('i', 'yc3-badge', un > 99 ? '99+' : String(un)));
           var dt = mkEl('span', 'yc3-pstat');
@@ -2287,10 +2580,13 @@
       // 3.6.8（审计 UI-3）：空状态不再藏标题行、不再改内边距——标题与邻卡同线、
       // padding 与所有卡统一，空状态内容由 CSS 在卡内垂直居中（.yc-un-empty margin:auto）
       if (!data.total) {
-        var em = mkEl('div', 'yc-un-empty');
-        em.innerHTML = ICO_EMPTY_OK;
-        em.appendChild(mkEl('b', '', L('没有未读消息')));
-        em.appendChild(mkEl('span', '', L('新消息会自动汇总到这里')));
+        var em = mkEl('div', 'yc-un-empty yc7-empty');
+        var eic = mkEl('span', 'yc7-empty-ico ok'); eic.innerHTML = ICO_EMPTY_OK; em.appendChild(eic);
+        em.appendChild(mkEl('b', 'yc7-empty-t', L('没有未读消息')));
+        em.appendChild(mkEl('span', 'yc7-empty-d', L('新消息会自动汇总到这里')));
+        var ebtn = mkEl('button', 'yc7-empty-btn', L('打开会话'));
+        ebtn.setAttribute('data-act', 'open-session'); ebtn.setAttribute('data-yc', '1');
+        em.appendChild(ebtn);
         unBox.appendChild(em);
       } else {
         var MAXU = 3;
@@ -2339,17 +2635,23 @@
     var ndot = wb.querySelector('.yc3-node-dot');
     if (nms && nst) {
       var grade, gcls;
-      if (!st || !(st.avgMs > 0)) { grade = L('暂无数据'); gcls = 'off'; }
+      var nInfoW = nodeMsInfo(st);
+      if (nInfoW.state === 'down') { grade = L('不通'); gcls = 'bad'; }
+      else if (!st || !(st.avgMs > 0)) { grade = L('暂无数据'); gcls = 'off'; }
       else if (st.avgMs <= 400) { grade = L('优秀'); gcls = 'good'; }
       else if (st.avgMs <= 1200) { grade = L('良好'); gcls = 'mid'; }
       else { grade = L('偏慢'); gcls = 'bad'; }
-      if (!st || !(st.avgMs > 0)) { if (nms.textContent !== '—') nms.textContent = '—'; }
+      if (nInfoW.state === 'down') {
+        if (nms._rollRaf) { try { cancelAnimationFrame(nms._rollRaf); } catch (e) {} nms._rollRaf = 0; }
+        if (nms.textContent !== nInfoW.text) nms.textContent = nInfoW.text;
+      }
+      else if (!st || !(st.avgMs > 0)) { if (nms.textContent !== '—') nms.textContent = '—'; }
       else rollNum(nms, 'ms', st.avgMs);
       if (nst.textContent !== grade) nst.textContent = grade;
       if (ndot) ndot.className = 'yc3-node-dot ' + gcls;
       var nsub = wb.querySelector('.yc3-node-sub');
       if (nsub) {
-        if (st && !(st.avgMs > 0)) {
+        if (st && !(st.avgMs > 0) && nInfoW.state !== 'down') {
           var hint = en ? 'Average latency will appear here once you translate' : '翻译后这里会显示平均延迟';
           if (nsub.textContent !== hint) nsub.textContent = hint;
         } else {
@@ -2359,7 +2661,7 @@
           if (nsub.textContent !== t2) nsub.textContent = t2;
         }
       }
-      if (nms) nms.classList.toggle('nodata', !(st && st.avgMs > 0));
+      if (nms) nms.classList.toggle('nodata', nInfoW.state === 'nodata');
     }
 
     // 今日目标进度环
@@ -2637,7 +2939,7 @@
     fab = mkEl('button', 'yc-snap-fab', L('导出结构快照'));
     fab.type = 'button';
     fab.setAttribute('data-yc', '1');
-    fab.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99990;background:#005dff;color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:13px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.35);';
+    fab.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99990;background:#2F6BFF;color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:13px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.35);';
     fab.addEventListener('click', function () { exportSnapshots(fab); });
     document.body.appendChild(fab);
   }
@@ -2700,7 +3002,628 @@
     }
   }
 
+  // ================================================================
+  // 3.7.2 会话页三帧＋设置五页 A 类落地（《UI 评审汇总 20261122》）
+  // 呈现与轻逻辑层：空状态接管 / 入口唯一化 / 工具置灰 / 置顶降级 /
+  // 窄条与顶栏收紧 / 设置五页呈现修正 / 面板联动。B 类不碰。
+  // 动态部分在本节，纯呈现在编译 CSS 的 3.7.2 段（yc372- 前缀）。
+  // ================================================================
+  var ICO_PIN372 = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5"/><path d="m6.5 9.5 5.5-5.5 5.5 5.5"/><path d="M4 20h16"/></svg>';
+  var ICO_SWAP372 = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2.5 21 6.5l-4 4"/><path d="M21 6.5H9.5"/><path d="m7 21.5-4-4 4-4"/><path d="M3 17.5h11.5"/></svg>';
+  var ICO_KEY372 = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15.5" r="4.5"/><path d="M11.3 12.3 20 3.6"/><path d="m15.5 8 3 3"/></svg>';
+  var ICO_IMG372 = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4.5 19 5-5 3 3 3-3 4.5 4.5"/></svg>';
+
+  function yc372Vis(el) { if (!el) return false; var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; }
+  function yc372Side() { var ss = document.querySelectorAll('.sess-side'); for (var i = 0; i < ss.length; i++) { if (ss[i].getBoundingClientRect().width > 0) return ss[i]; } return null; }
+  function yc372Main() { var ms = document.querySelectorAll('.sess-main'); for (var i = 0; i < ms.length; i++) { if (ms[i].getBoundingClientRect().width > 0) return ms[i]; } return null; }
+  function yc372EmptyBox(icon, title, desc) {
+    var box = mkEl('div', 'yc7-empty');
+    var ico = mkEl('span', 'yc7-empty-ico'); ico.innerHTML = icon; box.appendChild(ico);
+    box.appendChild(mkEl('b', 'yc7-empty-t', title));
+    if (desc) box.appendChild(mkEl('span', 'yc7-empty-d', desc));
+    return box;
+  }
+
+  // —— 条1：会话页空状态分场景接管 ——
+  // 会话打开后 React 会把空状态节点改作他用（类名变更，如 wa-mode-wrap），
+  // 注入盒失去宿主时必须自清，避免残留在编译功能区里。
+  function yc372SweepOrphans() {
+    var boxes = document.querySelectorAll('.yc372-sess-empty');
+    for (var i = 0; i < boxes.length; i++) {
+      if (!boxes[i].closest('.sess-main-empty')) boxes[i].remove();
+    }
+  }
+  function yc372ClickAddSession() {
+    var go = function () { var s = yc372Side(); var b = s && s.querySelector('.sess-add-session'); if (b) b.click(); };
+    if (getMode() !== 'normal') { setMode('normal'); setTimeout(go, 320); } else go();
+  }
+  function yc372SessEmpty() {
+    yc372SweepOrphans();
+    var main = yc372Main(); if (!main) return;
+    var empty = main.querySelector('.sess-main-empty');
+    if (!empty || !yc372Vis(empty)) return;
+    if (!empty.querySelector('.sess-main-empty-title')) return;   // 只接管真正的空状态
+    var host = main.closest('.sess') || document;
+    var n = host.querySelectorAll('.sess-acc-card').length;
+    var mode = getMode();
+    var scene = n === 0 ? 'zero' : 'some';
+    var sig = scene + '|' + mode + '|' + curLang();
+    empty.classList.add('yc372-empty-on');
+    if (empty.getAttribute('data-yc372-sig') === sig && empty.querySelector('.yc372-sess-empty')) return;
+    empty.setAttribute('data-yc372-sig', sig);
+    var old = empty.querySelector('.yc372-sess-empty'); if (old) old.remove();
+    var box;
+    if (scene === 'zero') {
+      box = yc372EmptyBox(ICO_CHAT, L('还没有会话'), L('新增一个会话，登录后就能在这里收发和翻译消息'));
+      box.classList.add('yc372-sess-empty');
+      var btn = mkEl('button', 'yc7-empty-btn yc372-primary-btn', L('＋ 新增会话'));
+      btn.setAttribute('data-yc', '1');
+      btn.addEventListener('click', function (e) { e.stopPropagation(); yc372ClickAddSession(); });
+      box.appendChild(btn);
+    } else {
+      box = yc372EmptyBox(ICO_CHAT, L('未打开会话'), L(mode === 'collapsed' ? '点击上方账号即可打开会话' : '点击左侧账号卡即可打开会话'));
+      box.classList.add('yc372-sess-empty');
+    }
+    empty.appendChild(box);
+  }
+  // —— 条2：左栏空区只留一行低调灰字（大字入口与悬停说明已由 CSS 隐藏） ——
+  function yc372NoSessLine() {
+    var list = document.querySelectorAll('.sess-empty');
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].querySelector('.yc372-no-sess')) continue;
+      list[i].appendChild(mkEl('div', 'yc372-no-sess', L('暂无会话')));
+    }
+  }
+  // —— 条3：右栏工具按会话状态置灰（话术库为全局工具，保持可用） ——
+  function yc372Tools() {
+    var main = yc372Main(); if (!main) return;
+    var empty = main.querySelector('.sess-main-empty');
+    var open = !(empty && yc372Vis(empty));
+    var tb = main.querySelector('.sess-toolbar'); if (!tb) return;
+    var dt = ['tool-translate', 'tool-profile', 'tool-material'];
+    for (var i = 0; i < dt.length; i++) {
+      var el = tb.querySelector('[data-t="' + dt[i] + '"]');
+      if (el) el.classList.toggle('yc372-tool-off', !open);
+    }
+    var dc = ['yc-dock-trans', 'yc-dock-shot', 'yc-dock-ai'];
+    for (var j = 0; j < dc.length; j++) {
+      var d = tb.querySelector('.' + dc[j]);
+      if (d) d.classList.toggle('yc372-tool-off', !open);
+    }
+  }
+  // —— 条4：置顶钮降级为栏头小图标钮（点击转发给原 #yc-rail-toggle 的切换逻辑） ——
+  function yc372PinBtns() {
+    var heads = document.querySelectorAll('.sess-side-head');
+    for (var i = 0; i < heads.length; i++) {
+      var head = heads[i];
+      if (head.querySelector('.yc372-pin-btn')) continue;
+      var btn = mkEl('span', 'yc372-pin-btn');
+      btn.innerHTML = ICO_PIN372;
+      btn.title = L('会话置于顶部');
+      btn.setAttribute('data-yc372', 'pin');
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var t = document.getElementById('yc-rail-toggle');
+        if (t) t.click();
+      });
+      var anchor = head.querySelector('#yc-head-toggle') || head.lastElementChild;
+      if (anchor && anchor.parentNode === head) head.insertBefore(btn, anchor);
+      else head.appendChild(btn);
+    }
+  }
+  // —— 条6：顶栏加会话钮与侧栏态同名 ——
+  function yc372MiniBar() {
+    var add = document.querySelector('#yc-mini-bar .yc-mini-add');
+    if (!add) return;
+    var want = L('＋ 新增会话');
+    if (add.textContent !== want) add.textContent = want;
+  }
+
+  // ================= 设置五页 =================
+  function yc372Settings() {
+    var settings = document.querySelector('.settings');
+    var active = document.querySelector('.settings-menu-item.active');
+    var name = active ? (active.textContent || '') : '';
+    if (settings) settings.classList.toggle('yc372-disp-single', name.indexOf('显示设置') !== -1);
+    var panel = document.querySelector('.settings-main .set-panel');
+    if (!panel) return;
+    if (panel.querySelector('.plat-grid')) yc372PlatPage(panel);
+    else if (panel.querySelector('.disp-plat-list')) yc372DispPage(panel);
+    else if (panel.querySelector('.perf-top')) yc372PerfPage(panel);
+    else if (panel.querySelector('[data-t="apikey-table"]')) yc372ApiKeyPage(panel);
+    else if (panel.querySelector('[data-t="translate-send-auto"]')) yc372TransPage(panel);
+  }
+  // —— 条9：平台设置 ——
+  function yc372PlatFilter(panel) {
+    var inp = panel.querySelector('.yc372-plat-search');
+    var grid = panel.querySelector('.plat-grid');
+    if (!inp || !grid) return;
+    var q = (inp.value || '').trim().toLowerCase();
+    var cards = grid.querySelectorAll('.plat-card');
+    for (var i = 0; i < cards.length; i++) {
+      var nm = cards[i].querySelector('.plat-card-name');
+      var hit = !q || ((nm ? nm.textContent : cards[i].textContent) || '').toLowerCase().indexOf(q) >= 0;
+      cards[i].style.display = hit ? '' : 'none';
+    }
+    var hs = grid.querySelectorAll('.yc372-plat-group-h');
+    for (var j = 0; j < hs.length; j++) hs[j].style.display = q ? 'none' : '';
+  }
+  function yc372PlatPage(panel) {
+    var grid = panel.querySelector('.plat-grid');
+    if (!grid) return;
+    if (!panel.querySelector('.yc372-plat-tools')) {
+      var tools = mkEl('div', 'yc372-plat-tools');
+      var inp = document.createElement('input');
+      inp.className = 'yc372-plat-search'; inp.type = 'text'; inp.placeholder = L('搜索平台');
+      inp.addEventListener('input', function () { yc372PlatFilter(panel); });
+      inp.addEventListener('click', function (e) { e.stopPropagation(); });
+      tools.appendChild(inp);
+      grid.parentNode.insertBefore(tools, grid);
+    }
+    var cards0 = grid.querySelectorAll('.plat-card');
+    for (var i = 0; i < cards0.length; i++) {
+      if (cards0[i].querySelector('.yc372-grip')) continue;
+      var grip = mkEl('span', 'yc372-grip'); grip.title = L('拖拽更换顺序');
+      cards0[i].insertBefore(grip, cards0[i].firstChild);
+    }
+    // 分组：已显示在前（搜索中不重排，交给过滤）
+    var inp2 = panel.querySelector('.yc372-plat-search');
+    var searching = inp2 && (inp2.value || '').trim();
+    var cards = Array.prototype.slice.call(grid.querySelectorAll('.plat-card'));
+    var sig = cards.map(function (c) { return c.querySelector('.ant-switch-checked') ? '1' : '0'; }).join('') + '|' + cards.length;
+    if (!searching && grid.getAttribute('data-yc372-gsig') !== sig) {
+      grid.setAttribute('data-yc372-gsig', sig);
+      var on = cards.filter(function (c) { return !!c.querySelector('.ant-switch-checked'); });
+      var off = cards.filter(function (c) { return !c.querySelector('.ant-switch-checked'); });
+      var hOn = grid.querySelector('.yc372-gh-on') || mkEl('div', 'yc372-plat-group-h yc372-gh-on');
+      var hOff = grid.querySelector('.yc372-gh-off') || mkEl('div', 'yc372-plat-group-h yc372-gh-off');
+      hOn.textContent = L('已显示') + ' (' + on.length + ')';
+      hOff.textContent = L('未显示') + ' (' + off.length + ')';
+      grid.appendChild(hOn);
+      on.forEach(function (c) { grid.appendChild(c); });
+      grid.appendChild(hOff);
+      off.forEach(function (c) { grid.appendChild(c); });
+    }
+    // 高级三行：收进一张卡＋人话短说明
+    if (!panel.querySelector('.yc372-adv-card')) {
+      var descs = panel.querySelectorAll('.plat-row-desc');
+      var pairs = [];
+      var SHORT = { '硬件加速': L('开启后使用显卡提升流畅度，需重启客户端生效'), '系统代理': L('启用系统范围的代理设置，修改后新建或重启会话生效'), '兼容模式': L('开启后需重启电脑生效，可正常拖拽文件及使用第三方截图工具') };
+      for (var d = 0; d < descs.length; d++) {
+        var row = descs[d].nextElementSibling;
+        if (!row || !row.querySelector('.set-switch-label')) continue;
+        var lab = row.querySelector('.set-switch-label').textContent || '';
+        var key = null;
+        for (var k in SHORT) { if (lab.indexOf(k) !== -1) { key = k; break; } }
+        if (key) pairs.push({ desc: descs[d], row: row, short: SHORT[key] });
+      }
+      if (pairs.length) {
+        var card = mkEl('div', 'yc372-adv-card');
+        pairs[0].desc.parentNode.insertBefore(card, pairs[0].desc);
+        pairs.forEach(function (p) {
+          card.appendChild(p.desc);
+          card.appendChild(p.row);
+          p.desc.classList.add('yc372-hidden');
+          var labBox = p.row.querySelector('.set-switch-label').parentElement;
+          if (labBox && !labBox.querySelector('.yc372-adv-desc')) labBox.appendChild(mkEl('span', 'yc372-adv-desc', p.short));
+        });
+      }
+    }
+    // 诊断独立成组
+    var subs = panel.querySelectorAll('.set-sub-title');
+    for (var s = 0; s < subs.length; s++) {
+      if (!/诊断/.test(subs[s].textContent || '')) continue;
+      if (subs[s].parentElement && subs[s].parentElement.classList.contains('yc372-diag-card')) break;
+      var btn = subs[s].nextElementSibling;
+      if (!btn) break;
+      var dc = mkEl('div', 'yc372-diag-card');
+      subs[s].parentNode.insertBefore(dc, subs[s]);
+      dc.appendChild(subs[s]);
+      dc.appendChild(mkEl('div', 'yc372-diag-desc', L('上传本机诊断信息和日志，用于问题排查')));
+      dc.appendChild(btn);
+      break;
+    }
+  }
+  // —— 条10：显示设置 ——
+  function yc372DispPage(panel) {
+    var row = panel.querySelector('.disp-color-row');
+    if (row && !row.querySelector('.yc372-color-lab')) {
+      var picker = row.querySelector('.disp-color-picker');
+      var swatch = row.querySelector('.disp-swatch');
+      if (picker) row.insertBefore(mkEl('span', 'yc372-color-lab', L('文字颜色')), picker);
+      if (swatch) row.insertBefore(mkEl('span', 'yc372-color-lab', L('预览')), swatch);
+    }
+    var subs = panel.querySelectorAll('.set-sub-title');
+    for (var s = 0; s < subs.length; s++) {
+      if (!/工单粉丝/.test(subs[s].textContent || '')) continue;
+      if (subs[s].parentElement && subs[s].parentElement.classList.contains('yc372-group-card')) break;
+      var r1 = subs[s].nextElementSibling, r2 = r1 && r1.nextElementSibling;
+      var gc = mkEl('div', 'yc372-group-card');
+      subs[s].parentNode.insertBefore(gc, subs[s]);
+      gc.appendChild(subs[s]);
+      if (r1) gc.appendChild(r1);
+      if (r2) gc.appendChild(r2);
+      break;
+    }
+  }
+  // —— 条11：性能监控 ——
+  function yc372PerfPage(panel) {
+    var cards = panel.querySelectorAll('.perf-card');
+    for (var i = 0; i < cards.length; i++) {
+      var lab = cards[i].querySelector('.perf-metric-label');
+      if (!lab) continue;
+      var lt = (lab.textContent || '').trim();
+      if (lt === '健康评分' && !cards[i].querySelector('.yc372-perf-note')) {
+        var sub = cards[i].querySelector('.perf-metric-sub');
+        if (sub) sub.classList.add('yc372-hidden');
+        cards[i].appendChild(mkEl('div', 'yc372-perf-note', L('85 以上为正常')));
+      }
+      if (lt === '本机启动情况' && !cards[i].querySelector('.yc372-perf-split')) {
+        var tags = cards[i].querySelectorAll('.ant-tag');
+        var mem = '', cpu = '';
+        for (var t = 0; t < tags.length; t++) {
+          var tx = (tags[t].textContent || '').trim();
+          if (tx.indexOf('内存') === 0) mem = tx;
+          if (tx.indexOf('CPU') === 0) cpu = tx;
+        }
+        var big = cards[i].querySelector('.perf-metric-big');
+        var num = big ? (parseInt(big.textContent, 10) || 0) : 0;
+        var split = mkEl('div', 'yc372-perf-split');
+        split.appendChild(mkEl('div', '', L('软件自身') + ' ' + mem + (cpu ? ' · ' + cpu : '')));
+        split.appendChild(mkEl('div', '', num === 0 ? L('账号合计') + ' —' : L('账号合计 已含在整机统计中')));
+        var sub2 = cards[i].querySelector('.perf-metric-sub');
+        if (sub2) cards[i].insertBefore(split, sub2); else cards[i].appendChild(split);
+      }
+    }
+    // 3.8.1（#21）：真实指标轮询接管本页数字（见 yc381Perf* 一组函数）
+    try { yc381PerfStart(); } catch (e) {}
+  }
+  // —— 3.8.1（#21）：性能监控真实数据 ——
+  // 本页数字原来是编译包写死的字面量（86 分/22%/652.66MB/假告警日期）。
+  // 数据经 window.yichat.getPerfMetrics() 从主进程 app.getAppMetrics() 聚合而来，
+  // 页面可见时每 2 秒拉一次并替换；溯源不了的量显示「—」，绝不编造。
+  var yc381PerfTimer = null, yc381PerfBusy = false;
+  function yc381FmtGB(mb) { return (mb / 1024).toFixed(2) + ' GB'; }
+  function yc381FmtMem(mb) { return mb >= 1024 ? yc381FmtGB(mb) : Math.round(mb) + ' MB'; }
+  function yc381NowStr() {
+    var d = new Date();
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '/' + p(d.getMonth() + 1) + '/' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+  function yc381PerfStart() {
+    if (yc381PerfTimer) return;
+    yc381PerfTimer = setInterval(yc381PerfTick, 2000);
+    yc381PerfTick();
+  }
+  function yc381PerfTick() {
+    try {
+      var panel = document.querySelector('.settings-main .set-panel');
+      if (!panel || !panel.querySelector('.perf-top')) return;
+      var api = null;
+      try { api = window.yichat; } catch (e) {}
+      if (!api || typeof api.getPerfMetrics !== 'function' || yc381PerfBusy) return;
+      yc381PerfBusy = true;
+      Promise.resolve(api.getPerfMetrics()).then(function (m) {
+        yc381PerfBusy = false;
+        if (!m || !m.ok) return;
+        var p2 = document.querySelector('.settings-main .set-panel');
+        if (p2 && p2.querySelector('.perf-top')) yc381PerfPaint(p2, m);
+      }).catch(function () { yc381PerfBusy = false; });
+    } catch (e) { yc381PerfBusy = false; }
+  }
+  function yc381PerfPaint(panel, m) {
+    var osUsedPct = m.osTotalMB > 0 ? Math.round((1 - m.osFreeMB / m.osTotalMB) * 1000) / 10 : 0;
+    var nowStr = yc381NowStr();
+    // 告警：阈值与本页「监控规则」自述一致（内存偏高 85% / CPU 偏高 88%），量全部来自真实指标
+    var alerts = [];
+    if (m.osTotalMB > 0 && osUsedPct >= 85) alerts.push(L('整机内存占用偏高') + '：' + osUsedPct + '%');
+    if (m.osCpuPct != null && m.osCpuPct >= 88) alerts.push(L('整机 CPU 占用偏高') + '：' + m.osCpuPct + '%');
+    if (m.appMemMB >= 2048) alerts.push(L('本软件内存占用偏高') + '：' + yc381FmtMem(m.appMemMB));
+    // 健康评分：只用能溯源的量——本软件内存占整机比例、本软件 CPU、整机内存水位
+    var sharePct = m.osTotalMB > 0 ? (m.appMemMB / m.osTotalMB) * 100 : 0;
+    var pen = Math.min(30, sharePct * 3)
+      + Math.min(40, Math.max(0, m.appCpuPct - 20) * 0.5)
+      + (osUsedPct > 85 ? Math.min(15, osUsedPct - 85) : 0);
+    var score = Math.max(1, Math.min(100, Math.round(100 - pen)));
+    var cards = panel.querySelectorAll('.perf-card');
+    for (var i = 0; i < cards.length; i++) {
+      var lab = cards[i].querySelector('.perf-metric-label');
+      if (!lab) continue;
+      var lt = (lab.textContent || '').trim();
+      var big = cards[i].querySelector('.perf-metric-big');
+      if (lt === L('健康评分') || lt === '健康评分') {
+        if (big) big.textContent = String(score);
+        var note = cards[i].querySelector('.yc372-perf-note');
+        if (!note) { note = mkEl('div', 'yc372-perf-note', ''); cards[i].appendChild(note); }
+        note.textContent = L('按本软件内存、CPU 占用与整机内存综合估算，每 2 秒刷新') + ' · ' + L('85 以上为正常');
+      } else if (lt === '内存') {
+        if (big) big.textContent = m.osTotalMB > 0 ? osUsedPct + '%' : '—';
+        var prog = cards[i].querySelector('.ant-progress');
+        if (prog && m.osTotalMB > 0) {
+          prog.setAttribute('aria-valuenow', String(Math.round(osUsedPct)));
+          var track = prog.querySelector('.ant-progress-track');
+          if (track) track.style.width = osUsedPct + '%';
+        }
+        var msub = cards[i].querySelector('.perf-metric-sub');
+        if (msub) msub.textContent = m.osTotalMB > 0
+          ? L('可用') + ' ' + yc381FmtGB(m.osFreeMB) + '，' + L('共') + ' ' + yc381FmtGB(m.osTotalMB)
+          : '—';
+      } else if (lt === 'CPU') {
+        if (big) big.textContent = m.osCpuPct != null ? m.osCpuPct + '%' : '—';
+      } else if (lt === '本机启动情况') {
+        if (big && big.firstChild && big.firstChild.nodeType === 3) big.firstChild.nodeValue = m.guestCount + ' ';
+        var tags = cards[i].querySelectorAll('.ant-tag');
+        for (var t = 0; t < tags.length; t++) {
+          var tx = (tags[t].textContent || '').trim();
+          if (tx.indexOf('内存') === 0) tags[t].textContent = L('内存') + ' ' + yc381FmtMem(m.appMemMB) + ' / ' + (m.osTotalMB > 0 ? yc381FmtGB(m.osTotalMB) : '—');
+          if (tx.indexOf('CPU') === 0) tags[t].textContent = 'CPU ' + m.appCpuPct + '%';
+        }
+        var split = cards[i].querySelector('.yc372-perf-split');
+        if (split && split.children.length >= 2) {
+          split.children[0].textContent = L('软件自身') + ' ' + L('内存') + ' ' + yc381FmtMem(m.appMemMB) + ' · CPU ' + m.appCpuPct + '%';
+          split.children[1].textContent = L('账号合计') + ' ' + yc381FmtMem(m.guestMemMB) + '（' + m.guestCount + ' ' + L('个账号页') + '）';
+        }
+      }
+    }
+    var upd = panel.querySelector('.perf-updated');
+    if (upd) upd.textContent = L('更新于') + ' ' + nowStr;
+    var okEl = panel.querySelector('.perf-ok');
+    if (okEl) okEl.textContent = alerts.length ? L('注意') : L('正常');
+    var arow = panel.querySelector('.perf-alert-row');
+    if (arow) {
+      var asub = arow.querySelector('.perf-metric-sub');
+      if (asub) asub.textContent = alerts.length ? (nowStr + ' ' + alerts.join('；')) : L('暂无告警');
+    }
+  }
+  // —— 条12：API Key 管理 ——
+  function yc372ApiKeyPage(panel) {
+    var wrap = panel.querySelector('.ant-table-wrapper');
+    var addBtn = panel.querySelector('[data-t="apikey-add"]');
+    if (wrap) {
+      var hasEmpty = !!wrap.querySelector('.ant-table-empty, .ant-empty');
+      var tpl = panel.querySelector('.yc372-key-empty');
+      if (hasEmpty) {
+        wrap.classList.add('yc372-hidden');
+        if (!tpl) {
+          tpl = yc372EmptyBox(ICO_KEY372, L('还没有 API Key'), L('添加后即可用于翻译、AI 帮写与语音功能，Key 加密保存在本机'));
+          tpl.classList.add('yc372-key-empty');
+          var btn = mkEl('button', 'yc7-empty-btn yc372-primary-btn', L('添加 Key'));
+          btn.setAttribute('data-yc', '1');
+          btn.addEventListener('click', function () { var b = panel.querySelector('[data-t="apikey-add"]'); if (b) b.click(); });
+          tpl.appendChild(btn);
+          var headRow = panel.querySelector('.set-panel-head-row');
+          if (headRow && headRow.nextSibling) headRow.parentNode.insertBefore(tpl, headRow.nextSibling);
+          else panel.appendChild(tpl);
+        }
+      } else {
+        wrap.classList.remove('yc372-hidden');
+        if (tpl) tpl.remove();
+      }
+    }
+    var sel = panel.querySelector('[data-t="tts-key-select"]');
+    var gen = panel.querySelector('[data-t="tts-generate"]');
+    if (sel && gen) {
+      var hasVal = !sel.querySelector('.ant-select-placeholder');
+      gen.classList.toggle('yc372-btn-off', !hasVal);
+    }
+    var au = panel.querySelector('audio[data-t="tts-audio"]');
+    if (au) {
+      var hasSrc = !!au.getAttribute('src');
+      var note = au.parentElement ? au.parentElement.querySelector('.yc372-tts-note') : null;
+      if (!hasSrc) {
+        au.classList.add('yc372-hidden');
+        if (!note && au.parentElement) {
+          var nt = mkEl('span', 'yc372-tts-note', L('生成后可在此试听'));
+          au.parentElement.insertBefore(nt, au.nextSibling);
+        }
+      } else {
+        au.classList.remove('yc372-hidden');
+        if (note) note.remove();
+      }
+    }
+    var ta = panel.querySelector('[data-t="tts-text"]');
+    if (ta && !ta.getAttribute('data-yc372-ph')) {
+      ta.setAttribute('data-yc372-ph', '1');
+      var v = ta.value || '';
+      if (/语音合成测试/.test(v)) {
+        try {
+          var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+          setter.call(ta, '');
+          ta.setAttribute('placeholder', v);
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (e) {}
+      }
+    }
+  }
+  // —— 条13：翻译设置 ——
+  function yc372Boltify(label) {
+    if (!label || label.getAttribute('data-yc372-bolt')) return;
+    var t = label.textContent || '';
+    if (t.indexOf('👉') === -1) { label.setAttribute('data-yc372-bolt', 'skip'); return; }
+    label.setAttribute('data-yc372-bolt', '1');
+    label.textContent = t.replace(/👉/g, '').trim();
+    var s = mkEl('span', 'yc372-bolt'); s.innerHTML = ICO_BOLT;
+    label.insertBefore(s, label.firstChild);
+  }
+  function yc372SelText(sel) { var c = sel.querySelector('.ant-select-content'); return c ? (c.textContent || '').trim() : ''; }
+  function yc372PickOption(sel, text, done) {
+    try { sel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); } catch (e) {}
+    setTimeout(function () {
+      var dds = document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
+      var opt = null;
+      for (var i = 0; i < dds.length && !opt; i++) {
+        var items = dds[i].querySelectorAll('.ant-select-item-option');
+        for (var j = 0; j < items.length; j++) { if ((items[j].textContent || '').trim() === text) { opt = items[j]; break; } }
+      }
+      if (opt) { opt.click(); done(true); return; }
+      try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); } catch (e) {}
+      done(false);
+    }, 220);
+  }
+  function yc372Swap(col) {
+    var sels = col.querySelectorAll('.ant-select');
+    if (sels.length < 2) return;
+    var a = sels[0], b = sels[1];
+    var ta = yc372SelText(a), tb = yc372SelText(b);
+    if (!ta || !tb || ta === tb) return;
+    yc372PickOption(b, ta, function (okB) {
+      if (!okB) { toast(L('源语言与目标语言不能直接交换'), true); return; }
+      yc372PickOption(a, tb, function (okA) {
+        if (!okA) yc372PickOption(b, tb, function () {});
+      });
+    });
+  }
+  function yc372TransPage(panel) {
+    var btns = [];
+    var all = panel.querySelectorAll('button');
+    for (var i = 0; i < all.length; i++) {
+      var tx = (all[i].textContent || '').trim();
+      if (tx === '全局模式' || tx === '独立模式') btns.push(all[i]);
+    }
+    if (btns.length === 2) {
+      var wrap = btns[0].parentElement;
+      var mode;
+      if (wrap.getAttribute('data-yc372-mode')) {
+        mode = wrap.getAttribute('data-yc372-mode');
+      } else {
+        // 首次：先撤掉分段样式再读编译激活色（#1890ff），避免被自己的覆写干扰
+        wrap.classList.remove('yc372-seg');
+        mode = getComputedStyle(btns[0]).backgroundColor === 'rgb(24, 144, 255)' ? 'global' : 'indep';
+        wrap.setAttribute('data-yc372-mode', mode);
+        btns.forEach(function (b) {
+          b.addEventListener('click', function () {
+            var m = (b.textContent || '').trim() === '全局模式' ? 'global' : 'indep';
+            wrap.setAttribute('data-yc372-mode', m);
+          });
+        });
+      }
+      wrap.classList.add('yc372-seg');
+      btns[0].classList.toggle('yc372-seg-on', mode === 'global');
+      btns[1].classList.toggle('yc372-seg-on', mode !== 'global');
+      var hint = wrap.querySelector('span');
+      if (hint) hint.classList.add('yc372-hidden');
+      var banner = panel.querySelector('.yc372-global-banner');
+      if (!banner) {
+        banner = mkEl('div', 'yc372-global-banner', L('当前为全局模式，在这里的修改会同步到所有平台'));
+        wrap.parentNode.insertBefore(banner, wrap.nextSibling);
+      }
+      banner.style.display = mode === 'global' ? '' : 'none';
+    }
+    var labels = panel.querySelectorAll('.set-switch-label');
+    for (var l = 0; l < labels.length; l++) yc372Boltify(labels[l]);
+    var cols = panel.querySelectorAll('.set-two-col');
+    for (var c = 0; c < cols.length; c++) {
+      if (cols[c].classList.contains('yc372-has-swap')) continue;
+      cols[c].classList.add('yc372-has-swap');
+      var sb = mkEl('button', 'yc372-swap');
+      sb.type = 'button'; sb.title = L('交换源语言与目标语言'); sb.innerHTML = ICO_SWAP372;
+      sb.setAttribute('data-yc', '1');
+      (function (col) { sb.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); yc372Swap(col); }); })(cols[c]);
+      cols[c].appendChild(sb);
+    }
+  }
+
+  // ================= 右栏面板 =================
+  function yc372SlidePanels() {
+    var sp = document.querySelector('.slide-panel');
+    if (sp && yc372Vis(sp)) {
+      var sw = sp.querySelector('[data-t="panel-chat-indep"]');
+      if (sw) {
+        // 条14：本会话独立设置关 → 其余字段组禁用呈现＋禁点
+        var on = sw.classList.contains('ant-switch-checked');
+        var rows = sp.querySelectorAll('.panel-row, .panel-field, .ant-btn-block');
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].contains(sw)) continue;
+          rows[i].classList.toggle('yc372-f-off', !on);
+        }
+        var labs = sp.querySelectorAll('.panel-row-label div');
+        for (var l = 0; l < labs.length; l++) yc372Boltify(labs[l]);
+      }
+    }
+    // 条16：用户画像空状态接管
+    var mp = document.querySelector('.mgmt-empty[data-t="profile-no-contact"]');
+    if (mp && !mp.classList.contains('yc372-prof-on')) {
+      mp.classList.add('yc372-prof-on');
+      var pb = yc372EmptyBox(ICO_IMG372, L('未打开聊天对象'), L('打开一个会话后，这里会显示对方的画像信息'));
+      pb.classList.add('yc372-prof-empty');
+      mp.appendChild(pb);
+    }
+    // 条17：话术库面板——列表优先＋搜索过滤＋空模板
+    var panels = document.querySelectorAll('.set-panel');
+    for (var p = 0; p < panels.length; p++) {
+      var ttl = panels[p].querySelector('.set-panel-title');
+      if (!ttl || (ttl.textContent || '').trim() !== '话术库') continue;
+      var panel = panels[p];
+      if (panel.closest('.settings-main')) continue;
+      var kids = Array.prototype.slice.call(panel.children);
+      var formDiv = null, listDiv = null;
+      for (var k = 0; k < kids.length; k++) {
+        if (kids[k].querySelector && kids[k].querySelector('textarea')) formDiv = kids[k];
+        else if (kids[k].tagName === 'DIV' && !kids[k].classList.contains('set-panel-title') && !kids[k].classList.contains('set-panel-desc')) listDiv = kids[k];
+      }
+      if (!formDiv || !listDiv) continue;
+      if (panel.querySelector('.yc372-phrase-search')) {
+        // 已处理过：只维护空态
+      } else {
+        var search = document.createElement('input');
+        search.className = 'yc372-phrase-search'; search.type = 'text'; search.placeholder = L('搜索话术');
+        search.addEventListener('click', function (e) { e.stopPropagation(); });
+        search.addEventListener('input', function () {
+          var q = (search.value || '').trim().toLowerCase();
+          var es = listDiv.children;
+          for (var e2 = 0; e2 < es.length; e2++) {
+            if (es[e2].classList.contains('yc372-phrase-empty')) continue;
+            es[e2].style.display = (!q || (es[e2].textContent || '').toLowerCase().indexOf(q) >= 0) ? '' : 'none';
+          }
+        });
+        panel.insertBefore(search, listDiv);
+        panel.insertBefore(listDiv, formDiv);
+      }
+      var hasEntry = false;
+      var es2 = listDiv.children;
+      for (var e3 = 0; e3 < es2.length; e3++) { if (!es2[e3].classList.contains('yc372-phrase-empty')) { hasEntry = true; break; } }
+      var tpl = listDiv.querySelector('.yc372-phrase-empty');
+      if (!hasEntry) {
+        listDiv.classList.add('yc372-phrases-baretxt');
+        if (!tpl) {
+          tpl = yc372EmptyBox(ICO_CHAT, L('暂无话术'), L('添加常用回复后，可一键插入或发送'));
+          tpl.classList.add('yc372-phrase-empty');
+          listDiv.appendChild(tpl);
+        }
+      } else {
+        listDiv.classList.remove('yc372-phrases-baretxt');
+        if (tpl) tpl.remove();
+      }
+    }
+  }
+  // —— 条15：AI 帮写生成钮随输入 ——
+  function yc372AiPanel() {
+    var body = document.querySelector('.yc-ai-body');
+    if (!body) return;
+    var ta = body.querySelector('.yc-ai-inp');
+    var gen = body.querySelector('.yc-ai-gen');
+    if (!ta || !gen) return;
+    gen.classList.toggle('yc372-gen-off', !(ta.value || '').trim());
+    if (!ta.getAttribute('data-yc372-l')) {
+      ta.setAttribute('data-yc372-l', '1');
+      ta.addEventListener('input', function () { gen.classList.toggle('yc372-gen-off', !(ta.value || '').trim()); });
+    }
+  }
+
+  function yc372Tick() {
+    try { yc372SessEmpty(); } catch (e) {}
+    try { yc372NoSessLine(); } catch (e) {}
+    try { yc372Tools(); } catch (e) {}
+    try { yc372PinBtns(); } catch (e) {}
+    try { yc372MiniBar(); } catch (e) {}
+    try { yc372Settings(); } catch (e) {}
+    try { yc372SlidePanels(); } catch (e) {}
+    try { yc372AiPanel(); } catch (e) {}
+  }
+
+
   function dashTick() {
+    try { yc372Tick(); } catch (e) {}              // 3.7.2：会话页三帧＋设置五页 A 类
     try { ensurePhraseActions(); } catch (e) {}   // 话术库：插入 / 发送
     try { syncUnread(); } catch (e) {}            // 未读角标 + 新消息通知
     try { paintRailBadges(); } catch (e) {}       // 左栏平台图标：在线绿点 + 未读角标
@@ -2716,6 +3639,8 @@
     try { trimClock(); } catch (e) {}             // 顶栏时钟只到分钟
     try { keepRemarks(); } catch (e) {}           // 账号备注：本地缓存兜底（演示模式原版不落盘）
     try { compactAccCards(); } catch (e) {}       // 会话页账号卡瘦身
+    try { ensureCardClick(); } catch (e) {}        // 会话页：单击账号卡直达上线（3.7.0）
+    try { ensureOnlineTitles(); } catch (e) {}     // 上线钮补 tooltip（3.7.0）
     try { tagPinTop(); } catch (e) {}             // 「会话置于顶部」浮钮收成账号栏通栏钮
     try { ensurePlatSearch(); } catch (e) {}      // 设置页：平台列表搜索框
     try { applyPlatFilter(); } catch (e) {}       // 设置页：平台搜索过滤（重渲染后补回）
