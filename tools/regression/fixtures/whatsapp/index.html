@@ -1,0 +1,27 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;margin:0}</style></head><body>
+<header style="position:fixed;left:0;top:0;width:64px;height:100vh;background:#f0f2f5">
+  <button style="width:40px;height:40px">💬</button>
+  <button style="width:40px;height:40px">📞</button>
+  <div style="position:absolute;bottom:8px;left:12px">
+    <button style="width:40px;height:40px">⚙</button>
+    <button id="wa-profile-btn" style="width:40px;height:40px"><img id="wa-rail-img" width="24" height="24" alt=""></button>
+  </div>
+</header>
+<div id="wa-panel" style="display:none;position:fixed;left:64px;top:0;width:486px;height:100vh;background:#fff;box-shadow:2px 0 8px rgba(0,0,0,.15)">
+  <header style="height:64px;display:flex;align-items:center;gap:12px"><button id="wa-back" style="width:40px;height:40px">←</button><h2 style="font-size:19px">Profile</h2></header>
+  <div style="display:flex;justify-content:center;padding:12px"><div id="wa-photo" style="width:120px;height:120px;border-radius:50%"></div></div>
+  <div style="padding:12px 28px"><div style="font-size:14px;color:#667781">Your name</div><div style="font-size:17px">Wa Tester</div></div>
+  <div style="padding:12px 28px"><div style="font-size:14px;color:#667781">About</div><div style="font-size:17px">hello there</div></div>
+  <div style="padding:12px 28px"><div style="font-size:14px;color:#667781">Phone number</div><div style="font-size:17px">+852 6123 4567</div></div>
+</div>
+<script>
+var panel = document.getElementById('wa-panel');
+document.getElementById('wa-profile-btn').addEventListener('click', function(){ panel.style.display = panel.style.display === 'none' ? 'block' : 'none'; });
+document.getElementById('wa-back').addEventListener('click', function(){ panel.style.display = 'none'; });
+if (location.search.indexOf('open=1') >= 0) panel.style.display = 'block';
+var PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=';
+document.getElementById('wa-photo').style.backgroundImage = 'url(' + PNG + ')';
+document.getElementById('wa-rail-img').src = PNG;
+</script>
+<script src="../overlay.js"></script>
+</body></html>

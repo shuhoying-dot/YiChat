@@ -1,0 +1,54 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{font-family:sans-serif;margin:0} .sidebar-header{display:flex;gap:8px;padding:8px;background:#fff}
+.btn-menu{position:fixed;left:8px;top:56px;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.3);padding:6px;z-index:50}
+.btn-menu-item{padding:8px 16px;cursor:pointer}
+.settings-layer{position:fixed;left:0;top:0;width:360px;height:100vh;background:#fff;z-index:40;box-shadow:2px 0 8px rgba(0,0,0,.2)}
+.profile-avatars-container{padding:16px} .profile-name{font-size:17px;font-weight:600}
+.row{padding:10px 16px} .row-title{font-size:15px} .row-subtitle{font-size:13px;color:#888}
+</style></head><body>
+<div class="sidebar-left">
+  <div class="sidebar-header main-search-sidebar-header">
+    <button class="btn-icon rp btn-menu-toggle sidebar-tools-button" id="burger">☰</button>
+    <input placeholder="Search">
+  </div>
+  <div class="chatlist"><div class="chat-row"><div class="avatar avatar-54"><img class="avatar-photo" alt=""></div><span class="peer-title">Some Peer</span></div></div>
+</div>
+<div class="btn-menu" id="menu" style="display:none">
+  <div class="btn-menu-item"><span class="tgico">&#xe900;</span><span>已保存的消息</span></div>
+  <div class="btn-menu-item"><span class="tgico">&#xe901;</span><span>联系人</span></div>
+  <div class="btn-menu-item" id="menu-settings"><span class="tgico">&#xe902;</span><span>设置</span></div>
+  <div class="btn-menu-item"><span class="tgico">&#xe903;</span><span>夜间模式</span></div>
+</div>
+<div class="transition-item settings-layer profile-container" id="settings" style="display:none">
+  <div class="sidebar-header"><button class="btn-icon sidebar-close-button" id="settings-close">×</button><div class="sidebar-header__title"><span class="i18n">Settings</span></div></div>
+  <div class="sidebar-content"><div class="profile-content is-me">
+    <div class="profile-avatars-container is-single">
+      <div class="avatar avatar-like avatar-120 avatar-gradient"><img class="avatar-photo" id="self-avatar-img" width="120" height="120"></div>
+      <div class="profile-avatars-info"><div class="profile-name">Test User</div><div class="profile-subtitle">online</div></div>
+    </div>
+    <div class="sidebar-left-section"><div class="sidebar-left-section-content">
+      <div class="rp row row-with-icon"><div class="row-title">+86 138 0000 0000</div><div class="row-subtitle">Phone</div></div>
+      <div class="rp row row-with-icon"><div class="row-title">@testuser</div><div class="row-subtitle">Username</div></div>
+      <div class="rp row row-with-icon"><div class="row-title pre-wrap">just a bio</div><div class="row-subtitle">Bio</div></div>
+    </div></div>
+  </div></div>
+</div>
+<script>
+var menu = document.getElementById('menu'), settings = document.getElementById('settings');
+document.getElementById('burger').addEventListener('mousedown', function(){ menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; });
+document.getElementById('menu-settings').addEventListener('click', function(){ menu.style.display = 'none'; settings.style.display = 'block'; });
+document.getElementById('settings-close').addEventListener('click', function(){ settings.style.display = 'none'; });
+if (location.search.indexOf('open=1') >= 0) settings.style.display = 'block';
+// late=1: simulate slow login/sync — sidebar header absent from DOM for the first 35s
+if (location.search.indexOf('late=1') >= 0) {
+  var hdr = document.querySelector('.sidebar-header'), par = hdr.parentNode, nxt = hdr.nextSibling;
+  par.removeChild(hdr);
+  setTimeout(function(){ par.insertBefore(hdr, nxt); }, 35000);
+}
+// avatar as blob URL (tests the fetch->blob->dataURL path)
+var c = document.createElement('canvas'); c.width = 120; c.height = 120;
+var x = c.getContext('2d'); x.fillStyle = '#2AABEE'; x.fillRect(0, 0, 120, 120);
+c.toBlob(function(b){ document.getElementById('self-avatar-img').src = URL.createObjectURL(b); });
+</script>
+<script src="../overlay.js"></script>
+</body></html>
