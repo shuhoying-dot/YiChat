@@ -2402,6 +2402,7 @@
   // （宿主 onProfileUpdate → Ze 落盘）。铁律：只读已验结构 + 本人锚点；
   // 读不到就静默，绝不猜、绝不把别人的资料写成自己的。
   // 结构依据（真机快照）：TG telegram-20261123-162509；WA whatsapp-20261123-162659/162925/163046。
+  // 2026-11-27 补：WA 商家版整页（whatsapp-20261127-223715）与 TG 现行头部（telegram-20261127-223715/223728）。
   var ycSelfSentKey = '';
   var ycSelfBusy = false;
   var ycSelfDone = false;      // 已成功拿到带名字的资料
@@ -2534,23 +2535,58 @@
     }
     return null;
   }
-  function ycReadWhatsApp() {
-    var found = ycWaPanel();
-    if (!found) {
-      var rail = document.querySelector('header');
-      if (rail) {
-        var btns = rail.querySelectorAll('button');
-        for (var i = btns.length - 1; i >= 0; i--) {
-          var im = btns[i].querySelector('img');
-          if (im) return { name: '', phone: '', avatarEl: im };
-        }
-      }
-      return null;
+  // —— WhatsApp 商家版（SMB）：本人资料是整页而非左抽屉（结构依据 whatsapp-20261127-223715）——
+  // 内容列约 726 宽、整页壳约 985 宽贴左；个人版抽屉判据（380–560 宽面板）永远摸不到，
+  // 旧版因此读不到、罩不住、关不掉，抓不到又不设标记 → 每次启动重试、每次停在主页。
+  // 判据：100–140 方形照片向上摸到 ≥900 宽贴左的整页壳，途中 ≤840 的最宽列作扫描根；
+  // 再加两道防误读：照片须在壳的左 35% 内（聊天图片在右列），且聊天列表不在场（整页资料会顶掉列表列）。
+  function ycWaChatListVisible() {
+    var all = document.querySelectorAll('div, section, aside');
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i].getBoundingClientRect();
+      if (r.width < 300 || r.width > 470 || r.height < 400) continue;
+      if (r.left < 40 || r.left > 130) continue;
+      // 被整页壳盖住的残留列表不算在场：验中心点最上层元素
+      try {
+        var top = document.elementFromPoint(r.left + r.width / 2, Math.min(r.top + 200, window.innerHeight - 10));
+        if (top && (top === all[i] || all[i].contains(top))) return true;
+      } catch (e) { return true; }
     }
-    var root = found.root;
+    return false;
+  }
+  function ycWaBizPanel() {
+    var all = document.querySelectorAll('div, section, span, img');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      var r = el.getBoundingClientRect();
+      if (r.width < 100 || r.width > 140 || Math.abs(r.width - r.height) > 8) continue;
+      if (r.top < 40 || r.top > 420) continue;
+      var bg = '';
+      try { bg = getComputedStyle(el).backgroundImage || ''; } catch (e) {}
+      var hasMedia = !!el.querySelector('img, canvas') || el.tagName === 'IMG' || bg.indexOf('url(') === 0;
+      if (!hasMedia) continue;
+      var p = el, root = null, shell = null;
+      for (var d = 0; d < 16 && p; d++) {
+        var pr = p.getBoundingClientRect();
+        if (pr.width >= 900 && pr.left <= 80) { shell = p; break; }
+        if (pr.width >= 560 && pr.width <= 840) root = p;
+        p = p.parentElement;
+      }
+      if (!shell || !root) continue;
+      var sr = shell.getBoundingClientRect();
+      if (r.left > sr.left + sr.width * 0.35) continue;
+      if (ycWaChatListVisible()) continue;
+      return { root: root, photo: el, shell: shell, fullPage: true };
+    }
+    return null;
+  }
+  // 面板内文本扫描：电话取 +号码 形状；名字取 ≥16px 叶子文本。
+  // nameBeside=false（个人版抽屉，已验）：名字须在照片下方；true（商家整页）：名字可在照片同行右侧。
+  function ycWaScan(root, photo, nameBeside) {
     var phone = '';
     var name = '';
-    var photoBottom = found.photo.getBoundingClientRect().bottom;
+    var pr = photo.getBoundingClientRect();
+    var nameTop = nameBeside ? pr.top - 4 : pr.bottom - 4;
     var leaves = root.querySelectorAll('span, div, h2');
     for (var j = 0; j < leaves.length; j++) {
       var el = leaves[j];
@@ -2560,14 +2596,29 @@
       var r = el.getBoundingClientRect();
       if (r.height === 0) continue;
       if (!phone && /^\+[\d\s-]{5,}$/.test(t)) phone = t.replace(/[\s-]/g, '');
-      if (!name && r.top >= photoBottom - 4) {
+      if (!name && r.top >= nameTop) {
         var fs = 0;
         try { fs = parseFloat(getComputedStyle(el).fontSize) || 0; } catch (e) {}
         if (fs >= 16 && !/^\+/.test(t)) name = t;
       }
       if (name && phone) break;
     }
-    return { name: name, phone: phone, avatarEl: found.photo };
+    return { name: name, phone: phone, avatarEl: photo };
+  }
+  function ycReadWhatsApp() {
+    var found = ycWaPanel();
+    if (found) return ycWaScan(found.root, found.photo, false);
+    var biz = ycWaBizPanel();
+    if (biz) { ycSelfDbg('wa:biz-panel'); return ycWaScan(biz.root, biz.photo, true); }
+    var rail = document.querySelector('header');
+    if (rail) {
+      var btns = rail.querySelectorAll('button');
+      for (var i = btns.length - 1; i >= 0; i--) {
+        var im = btns[i].querySelector('img');
+        if (im) return { name: '', phone: '', avatarEl: im };
+      }
+    }
+    return null;
   }
 
   var YC_SELF_READERS = { telegram: ycReadTelegram, whatsapp: ycReadWhatsApp };
@@ -2647,6 +2698,13 @@
     ycCloakEl = null;
   }
   function ycTgBurger() {
+    // 先认主侧栏头部里可见的汉堡钮：页面里另有设置层/置顶条的同名钮（不可见或位置不对），
+    // 摸错钮点了没反应（结构依据 telegram-20261127-223715/223728）。
+    var scoped = document.querySelectorAll('.sidebar-header.main-search-sidebar-header .btn-menu-toggle, .left-sidebar-burger .btn-menu-toggle');
+    for (var s = 0; s < scoped.length; s++) {
+      var sr = scoped[s].getBoundingClientRect();
+      if (sr.width > 0 && sr.height > 0) return scoped[s];
+    }
     var b = document.querySelector('.sidebar-header .btn-menu-toggle') ||
             document.querySelector('.btn-menu-toggle.sidebar-tools-button');
     if (b) return b;
@@ -2664,27 +2722,45 @@
     ycSelfDbg('tg:burger');
     ycCloakOn();
     ycRealClick(burger);
-    setTimeout(function () {
-      try {
-        var menu = document.querySelector('.btn-menu');
-        ycSelfDbg(menu ? 'tg:menu-open' : 'tg:no-menu');
-        var item = ycFindSettingsItem(menu);
-        ycSelfDbg(item ? 'tg:item-found' : 'tg:no-item');
-        if (item) ycRealClick(item);
-      } catch (e) { ycSelfDbg('tg:menu-err'); }
-      setTimeout(function () {
-        ycSelfDbg(document.querySelector('.profile-content.is-me') ? 'tg:profile-visible' : 'tg:profile-missing');
-        ycSelfRead();
-        ycCloseWhenDone(function () {
-          var cb = document.querySelector('.settings-layer .sidebar-close-button') ||
-                   document.querySelector('.profile-container .sidebar-close-button');
-          if (cb) { ycRealClick(cb); setTimeout(ycCloakOff, 350); return; }
-          if (document.querySelector('.btn-menu')) ycRealClick(burger);
-          setTimeout(ycCloakOff, 350);
-        }, Date.now() + 3200);
-      }, 1300);
-    }, 700);
+    // 菜单与设置层都是异步渲染：旧版点完固定等 700ms 只查一次，慢机/忙碌时菜单还没出来就
+    // 判失败静默放弃（2026-11-27 Mac 实测自动路从未成功、手动开页被动读却正常）。
+    // 改为轮询：2.6 秒内等设置项出现，点后再轮询 3 秒等本人资料层可见。
+    var menuDeadline = Date.now() + 2600;
+    var menuIv = setInterval(function () {
+      var item = null;
+      try { item = ycFindSettingsItem(document.querySelector('.btn-menu')); } catch (e) {}
+      if (item) {
+        clearInterval(menuIv);
+        ycSelfDbg('tg:item-found');
+        ycRealClick(item);
+        ycTgWaitProfile(burger);
+        return;
+      }
+      if (Date.now() > menuDeadline) {
+        clearInterval(menuIv);
+        ycSelfDbg(document.querySelector('.btn-menu') ? 'tg:no-item' : 'tg:no-menu');
+        ycCloakOff();
+      }
+    }, 250);
     return true;
+  }
+  function ycTgWaitProfile(burger) {
+    var deadline = Date.now() + 3000;
+    var iv = setInterval(function () {
+      var open = false;
+      try { var pc = document.querySelector('.profile-content.is-me'); open = !!(pc && pc.getClientRects().length); } catch (e) {}
+      if (!open && Date.now() <= deadline) return;
+      clearInterval(iv);
+      ycSelfDbg(open ? 'tg:profile-visible' : 'tg:profile-missing');
+      ycSelfRead();
+      ycCloseWhenDone(function () {
+        var cb = document.querySelector('.settings-layer .sidebar-close-button') ||
+                 document.querySelector('.profile-container .sidebar-close-button');
+        if (cb) { ycRealClick(cb); setTimeout(ycCloakOff, 350); return; }
+        if (document.querySelector('.btn-menu')) ycRealClick(burger);
+        setTimeout(ycCloakOff, 350);
+      }, Date.now() + 3200);
+    }, 300);
   }
   function ycWaAuto() {
     var rail = document.querySelector('header');
@@ -2696,15 +2772,18 @@
     ycSelfDbg('wa:rail-click');
     ycRealClick(target);
     // WA 面板类名混淆、罩不了 CSS：轮询找到面板根就地隐形（opacity 不影响几何读取）
+    // 个人版罩抽屉根；商家版罩整页壳（整页没有抽屉根可罩）。
     var waCloaked = null;
     var waCloakIv = setInterval(function () {
       try {
-        var f = ycWaPanel();
-        if (f && f.root && f.root !== waCloaked) {
-          waCloaked = f.root;
+        var f = ycWaPanel() || ycWaBizPanel();
+        var target = f ? (f.fullPage ? f.shell : f.root) : null;
+        if (target && target !== waCloaked) {
+          if (waCloaked) { try { waCloaked.style.opacity = ''; waCloaked.style.pointerEvents = ''; } catch (e) {} }
+          waCloaked = target;
           waCloaked.style.opacity = '0';
           waCloaked.style.pointerEvents = 'none';
-          ycSelfDbg('wa:cloaked');
+          ycSelfDbg(f.fullPage ? 'wa:biz-cloaked' : 'wa:cloaked');
         }
       } catch (e) {}
     }, 60);
@@ -2717,6 +2796,21 @@
     setTimeout(function () {
       ycSelfRead();
       ycCloseWhenDone(function () {
+        // 商家整页：点整页壳内页眉的第一个钮（返回钮，结构依据 223715 的 985 宽页眉）；
+        // 找不到就点左轨第一个钮（会话）回列表。
+        var biz = ycWaBizPanel();
+        if (biz) {
+          var phdr = biz.shell.querySelector('header');
+          var pback = phdr ? phdr.querySelector('button') : null;
+          if (pback) ycRealClick(pback);
+          else {
+            var railEl = document.querySelector('header');
+            var chatsBtn = railEl ? railEl.querySelector('button') : null;
+            if (chatsBtn) ycRealClick(chatsBtn);
+          }
+          setTimeout(waUncloak, 350);
+          return;
+        }
         var found = ycWaPanel();
         if (found) {
           var hdr = found.root.querySelector('header');

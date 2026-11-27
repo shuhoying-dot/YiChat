@@ -173,7 +173,46 @@
     '左侧图标栏显示哪些平台': 'which platforms show in the rail',
     '翻译延迟 · 成功率 · 失败分析': 'latency · success · failures',
     '重置缩放': 'Reset zoom',
-    '新消息会自动汇总到这里': 'New messages are collected here automatically'
+    '新消息会自动汇总到这里': 'New messages are collected here automatically',
+    /* 2026-11-27 home-screen i18n: strings the English UI still showed in Chinese (user-reported 2026-11-26) */
+    '功能 Key 未配置': 'No API key configured',
+    '翻译、看图、AI 帮写与语音功能暂不可用，先录入一把 Key 即可开始使用。': 'Translation, vision, AI Compose and voice are unavailable until you add a key.',
+    '去录入 Key': 'Add a key',
+    '翻译默认 Key 未指定': 'No default translation key',
+    '大模型翻译不会工作，到翻译设置里选用一把 Key 即可。': 'LLM translation will not work — pick a key in Translation settings.',
+    '去翻译设置': 'Open Translation settings',
+    '打开会话': 'Open chat',
+    '功能 Key 一览': 'API keys by feature',
+    '各功能实际用的 Key': 'which key each feature actually uses',
+    '语音识别': 'Speech recognition',
+    '看图': 'Vision',
+    '语音合成': 'Text-to-speech',
+    '未配置': 'Not configured',
+    '未命名': 'Unnamed',
+    '录入后自动检测连接': 'Connection is checked automatically after adding',
+    '保存 Key 时自动检测连接': 'Connection is checked automatically when saving a key',
+    '管理 Key': 'Manage keys',
+    '语音 / 看图用量': 'Voice / vision usage',
+    '近7天': 'Last 7 days',
+    '今天': 'Today',
+    '语音': 'Voice',
+    '合成': 'TTS',
+    '上线（打开会话）': 'Online (open chat)',
+    '还没有会话': 'No chats yet',
+    '新增一个会话，登录后就能在这里收发和翻译消息': 'Add a chat — sign in and start messaging with translation here',
+    '＋ 新增会话': '+ New chat',
+    '未打开会话': 'No chat open',
+    '点击上方账号即可打开会话': 'Click an account above to open a chat',
+    '点击左侧账号卡即可打开会话': 'Click an account card on the left to open a chat',
+    '暂无会话': 'No chats',
+    '未打开聊天对象': 'No chat open',
+    '打开一个会话后，这里会显示对方的画像信息': 'Open a chat and the other person’s profile will show here',
+    '暂无告警': 'No alerts',
+    '翻译节点偏慢': 'Translate node is slow',
+    '翻译会明显变卡，去翻译设置看下节点': 'translation will lag noticeably — check the node in Translation settings',
+    '今日翻译失败': 'Failed translations today',
+    '条，去翻译设置检查节点或 Key': '— check the node or keys in Translation settings',
+    '翻译节点不通，翻译会明显变卡，去翻译设置看下节点': 'Translate node unreachable — translation will lag noticeably; check the node in Translation settings'
   };
   function L(s) { return curLang() === 'en' ? (EN[s] || s) : s; }
   var uiLang = curLang();
@@ -2202,7 +2241,7 @@
             var row = mkEl('div', 'yc3-kv');
             row.appendChild(mkEl('span', 'yc3-kv-l', L(r[0])));
             var v = mkEl('span', 'yc3-kv-v' + (r[1] ? '' : ' none'));
-            v.textContent = r[1] ? ((r[1].name || '未命名') + ' · ' + (r[1].model || r[1].ttsModel || r[1].asrModel || '')) : L('未配置');
+            v.textContent = r[1] ? ((r[1].name || L('未命名')) + ' · ' + (r[1].model || r[1].ttsModel || r[1].asrModel || '')) : L('未配置');
             row.appendChild(v);
             kc.appendChild(row);
           });
@@ -2227,7 +2266,7 @@
             var v = mkEl('span', 'yc3-kv-v');
             [['语音', pr[1].v], ['看图', pr[1].i], ['合成', pr[1].t]].forEach(function (seg, si) {
               if (si) v.appendChild(document.createTextNode(' · '));
-              v.appendChild(document.createTextNode(seg[0] + ' '));
+              v.appendChild(document.createTextNode(L(seg[0]) + ' '));
               v.appendChild(mkEl('b', 'yc3-kv-n', String(seg[1])));
             });
             row.appendChild(v);
