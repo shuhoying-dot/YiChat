@@ -1,0 +1,41 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;margin:0}</style></head><body>
+<!-- 仿真依据：whatsapp-20261127-232552 真机快照 + overlay-diag 步进实锤。
+     窗口 1049 宽时：左轨 64、聊天列表列 420 常驻可见，商家资料整页 985 宽
+     在列表列右侧打开（壳 left=420），内层 937、内容列 726、照片 120×120。
+     旧判据（壳贴左 ≤80 / 照片在壳左 35% 内 / 列表不在场）在此布局下必然误杀。 -->
+<header style="position:fixed;left:0;top:0;width:64px;height:100vh;background:#f0f2f5;z-index:3">
+  <button style="width:40px;height:40px">💬</button>
+  <button style="width:40px;height:40px">📞</button>
+  <div style="position:absolute;bottom:8px;left:12px">
+    <button style="width:40px;height:40px">⚙</button>
+    <button id="wa-profile-btn" style="width:40px;height:40px"><img id="wa-rail-img" width="24" height="24" alt=""></button>
+  </div>
+</header>
+<div id="wa-list" style="position:fixed;left:0;top:0;width:420px;height:100vh;background:#fff;z-index:1">
+  <div style="padding:10px 16px;font-size:19px">Chats</div>
+  <div style="display:flex;gap:12px;padding:10px 16px;align-items:center"><img class="wa-list-av" width="48" height="48" alt=""><div><div style="font-size:16px">Customer One</div><div style="font-size:13px;color:#667781">hello</div></div></div>
+  <div style="display:flex;gap:12px;padding:10px 16px;align-items:center"><img class="wa-list-av" width="48" height="48" alt=""><div><div style="font-size:16px">Customer Two</div><div style="font-size:13px;color:#667781">ok</div></div></div>
+</div>
+<div id="wa-biz" style="display:none;position:fixed;left:420px;top:0;width:985px;height:100vh;background:#f0f2f5;z-index:2">
+  <header style="height:64px;display:flex;align-items:center;gap:12px;background:#fff"><button id="wa-biz-back" style="width:40px;height:40px">←</button><h2 style="font-size:19px">Business profile</h2></header>
+  <div style="width:937px;margin-left:24px">
+    <div style="width:726px;margin:0 auto;background:#fff;padding:24px 0">
+      <div style="display:flex;justify-content:flex-start;padding:0 24px"><div id="wa-biz-photo" style="width:120px;height:120px;border-radius:50%"></div></div>
+      <div style="padding:12px 24px"><div style="font-size:17px">AXPM Services</div></div>
+      <div style="padding:12px 24px"><div style="font-size:14px;color:#667781">Phone number</div><div style="font-size:17px">+852 6123 4567</div></div>
+      <div style="padding:12px 24px"><div style="font-size:14px;color:#667781">Email</div><div style="font-size:17px">hello@example.com</div></div>
+    </div>
+  </div>
+</div>
+<script>
+var biz = document.getElementById('wa-biz');
+document.getElementById('wa-profile-btn').addEventListener('click', function(){ biz.style.display = biz.style.display === 'none' ? 'block' : 'none'; });
+document.getElementById('wa-biz-back').addEventListener('click', function(){ biz.style.display = 'none'; });
+if (location.search.indexOf('open=1') >= 0) biz.style.display = 'block';
+var PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=';
+document.getElementById('wa-biz-photo').style.backgroundImage = 'url(' + PNG + ')';
+document.getElementById('wa-rail-img').src = PNG;
+var avs = document.querySelectorAll('.wa-list-av'); for (var i = 0; i < avs.length; i++) avs[i].src = PNG;
+</script>
+<script src="../overlay.js"></script>
+</body></html>

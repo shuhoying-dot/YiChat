@@ -2536,24 +2536,15 @@
     return null;
   }
   // —— WhatsApp 商家版（SMB）：本人资料是整页而非左抽屉（结构依据 whatsapp-20261127-223715）——
-  // 内容列约 726 宽、整页壳约 985 宽贴左；个人版抽屉判据（380–560 宽面板）永远摸不到，
+  // 内容列约 726 宽、整页壳约 985 宽；个人版抽屉判据（380–560 宽面板）永远摸不到，
   // 旧版因此读不到、罩不住、关不掉，抓不到又不设标记 → 每次启动重试、每次停在主页。
-  // 判据：100–140 方形照片向上摸到 ≥900 宽贴左的整页壳，途中 ≤840 的最宽列作扫描根；
-  // 再加两道防误读：照片须在壳的左 35% 内（聊天图片在右列），且聊天列表不在场（整页资料会顶掉列表列）。
-  function ycWaChatListVisible() {
-    var all = document.querySelectorAll('div, section, aside');
-    for (var i = 0; i < all.length; i++) {
-      var r = all[i].getBoundingClientRect();
-      if (r.width < 300 || r.width > 470 || r.height < 400) continue;
-      if (r.left < 40 || r.left > 130) continue;
-      // 被整页壳盖住的残留列表不算在场：验中心点最上层元素
-      try {
-        var top = document.elementFromPoint(r.left + r.width / 2, Math.min(r.top + 200, window.innerHeight - 10));
-        if (top && (top === all[i] || all[i].contains(top))) return true;
-      } catch (e) { return true; }
-    }
-    return false;
-  }
+  // 判据：100–140 方形照片向上摸到 ≥900 宽的整页壳，途中 560–840 的最宽列作扫描根，
+  // 再验照片在内容列左半内（资料页照片恒在列首；聊天图片在气泡里、列右居多）。
+  // 2026-11-27 晚 Mac 实测教训（快照 whatsapp-20261127-232552＋overlay-diag 步进）：
+  // 窗口 1049 宽时资料页在 420 宽聊天列表列右侧打开（壳 left≈420）、列表列与整页并存，
+  // 初版三道位置判据（壳贴左 ≤80、照片在壳左 35% 内、列表不在场）在此布局下必然误杀——
+  // 日志里 wa:rail-click 连点 6 次而 wa:biz-panel 一次未触发。故位置判据全部撤除，
+  // 只留结构链（方形照片→内容列→整页壳）＋列左半校验；回归夹具 whatsapp-biz 专仿此布局。
   function ycWaBizPanel() {
     var all = document.querySelectorAll('div, section, span, img');
     for (var i = 0; i < all.length; i++) {
@@ -2568,14 +2559,16 @@
       var p = el, root = null, shell = null;
       for (var d = 0; d < 16 && p; d++) {
         var pr = p.getBoundingClientRect();
-        if (pr.width >= 900 && pr.left <= 80) { shell = p; break; }
+        if (pr.width >= 900) {
+          if (pr.width >= window.innerWidth - 8) break; // 到 html/body 层为止
+          shell = p; // 不停在内层 937：取最外层整页壳（985），关页找页眉返回钮要靠它
+        } else if (shell) break; // 壳链断了就停
         if (pr.width >= 560 && pr.width <= 840) root = p;
         p = p.parentElement;
       }
       if (!shell || !root) continue;
-      var sr = shell.getBoundingClientRect();
-      if (r.left > sr.left + sr.width * 0.35) continue;
-      if (ycWaChatListVisible()) continue;
+      var rr = root.getBoundingClientRect();
+      if (r.left > rr.left + rr.width * 0.5) continue;
       return { root: root, photo: el, shell: shell, fullPage: true };
     }
     return null;
@@ -2773,8 +2766,10 @@
     ycRealClick(target);
     // WA 面板类名混淆、罩不了 CSS：轮询找到面板根就地隐形（opacity 不影响几何读取）
     // 个人版罩抽屉根；商家版罩整页壳（整页没有抽屉根可罩）。
+    // 点击后先同步罩一次再启轮询：面板在点击事件里同步打开，若等首个 60ms tick
+    // 才罩，中间会漏出一帧可见面板（回归 A7 实测恰漏 1 帧，2026-11-28）。
     var waCloaked = null;
-    var waCloakIv = setInterval(function () {
+    var waCloakTick = function () {
       try {
         var f = ycWaPanel() || ycWaBizPanel();
         var target = f ? (f.fullPage ? f.shell : f.root) : null;
@@ -2786,7 +2781,9 @@
           ycSelfDbg(f.fullPage ? 'wa:biz-cloaked' : 'wa:cloaked');
         }
       } catch (e) {}
-    }, 60);
+    };
+    waCloakTick();
+    var waCloakIv = setInterval(waCloakTick, 60);
     var waUncloak = function () {
       clearInterval(waCloakIv);
       try { if (waCloaked) { waCloaked.style.opacity = ''; waCloaked.style.pointerEvents = ''; } } catch (e) {}

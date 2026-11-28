@@ -7,7 +7,7 @@
 #   「成品 asar 解出的 dist」跑一遍（打包流程的一部分，不过不发版）。
 #
 # 覆盖三套仿真（全部断言化，任一失败退出码非 0）：
-#   A. overlay 资料抓取七场景（TG/WA × 被动/自动、每号一次标记、隐形罩）
+#   A. overlay 资料抓取九场景（TG/WA × 被动/自动、WA 商家整页 ×2、每号一次标记、隐形罩）
 #   B. AI 帮写开关七段序列（点开→点关→点开→双击→✕关→点开→点遮罩关）
 #   C. 工作台与数据备份（备份卡、冷启动文案、平台验证徽标、备份收集/恢复全链路）
 #
@@ -98,8 +98,18 @@ def suite_overlay(b):
     sent, _, errs = scenario(base + '/whatsapp/?open=1', 14)
     report('A3 WA 被动抓取', bool(named(sent)) and not errs, f'sends={len(sent)} errs={errs[:2]}')
     sent, _, errs = scenario(base + '/whatsapp/', 45,
-                             "() => document.getElementById('wa-panel').style.display === 'none'")
-    report('A4 WA 自动抓取', bool(sent) and not errs, f'sends={len(sent)} errs={errs[:2]}')
+                             "() => document.getElementById('wa-panel').style.display === 'none' && (window.__sent || []).some(x => x.ch === 'scrm:profile' && x.payload && x.payload.name)")
+    report('A4 WA 自动抓取', bool(named(sent)) and not errs, f'sends={len(sent)} errs={errs[:2]}')
+    # A8/A9 商家版整页（仿真 whatsapp-20261127-232552 真机布局：列表列 420 常驻、
+    # 整页壳 left=420；旧判据在此布局下误杀，2026-11-27 Mac 实测识别一次未触发）
+    # 注意：自动场景的 end_check 必须同时验「已抓到带名字资料」，只验「面板已关」
+    # 会在开局（面板本来就是关的）被 avatar-only 发送提前触发收工，自动流程
+    # （9 秒才第一次尝试）还没跑就判失败——A9 曾因此假失败、A4 曾因此假通过。
+    sent, _, errs = scenario(base + '/whatsapp-biz/?open=1', 14)
+    report('A8 WA 商家整页被动抓取', bool(named(sent)) and not errs, f'sends={len(sent)} errs={errs[:2]}')
+    sent, _, errs = scenario(base + '/whatsapp-biz/', 45,
+                             "() => document.getElementById('wa-biz').style.display === 'none' && (window.__sent || []).some(x => x.ch === 'scrm:profile' && x.payload && x.payload.name)")
+    report('A9 WA 商家整页自动抓取', bool(named(sent)) and not errs, f'sends={len(sent)} errs={errs[:2]}')
 
     # A5 每号一次标记：抓到后置标记，重载后不再自动打开
     pg = b.new_page(viewport={'width': 1242, 'height': 864})
